@@ -91,7 +91,7 @@ Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec`, `agent.run` (hand 
 
 Adding an event = one line in `catalog.js` (fields + dedup key) + one branch in `sources.js`. The validator and the prompt follow automatically, because all three read the same catalog.
 
-`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output, diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
+`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output, diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described **newly** happen?" — the judge enforces delta semantics on snapshot pairs, so a page reshuffling around the same old news does not re-fire. The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
 
 The three open-world pieces compose. One sentence —
 

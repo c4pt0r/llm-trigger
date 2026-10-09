@@ -12,10 +12,18 @@ const SYSTEM = `You are a strict yes/no judge inside a trigger system. You get o
 Answer ONLY with {"answers":[{"n":1,"yes":true|false,"why":"<short reason, user's language>"}, ...]} — one entry per question, same order.
 Judge only from the event content. When unsure, answer no.`;
 
+// Snapshot-diff events (observe.changed) would otherwise re-fire on every page
+// shuffle while the same news stays up: the judge must apply DELTA semantics,
+// no matter how the compiled question is phrased.
+const DELTA_NOTE = `This event is a snapshot diff: "previous" is the last snapshot, "content" is the current one.
+Answer yes ONLY if what a question asks about NEWLY appeared (or newly became true) in "content" compared to "previous".
+If it was already present in "previous", answer no — it was reported when it first appeared.`;
+
 /** Model judge: all agent conditions of one fact in a single pi call. */
 export async function judgeFact(conds, fact, { model } = {}) {
   const questions = conds.map((c, i) => `${i + 1}. ${c.field === "*" ? "" : `[about field ${c.field}] `}${c.value}`);
-  const user = `Event:\n${JSON.stringify(fact)}\n\nQuestions:\n${questions.join("\n")}`;
+  const delta = typeof fact.previous === "string" && typeof fact.content === "string";
+  const user = `Event:\n${JSON.stringify(fact)}\n${delta ? `\n${DELTA_NOTE}\n` : ""}\nQuestions:\n${questions.join("\n")}`;
   const { value } = await agentJson({ system: SYSTEM, user, model });
   const answers = Array.isArray(value?.answers) ? value.answers : [];
   if (answers.length !== conds.length) throw new Error(`judge returned ${answers.length} answers for ${conds.length} questions`);
