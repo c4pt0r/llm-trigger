@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>llm-trigger · 自然语言 → IF/THEN</title>
+<style>
+:root{--bg:#0d0e10;--fg:#e8eaec;--mut:#9aa0a6;--line:#26292d;--surf:#15171a;--surf2:#1d2024;--ok:#5cc98a;--err:#e5695f;--warn:#d8b45a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:28px 20px 80px}
+h1{font-size:19px;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:22px}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+textarea{width:100%;background:var(--surf2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+button{background:var(--fg);color:var(--bg);border:0;border-radius:7px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button.sm{padding:4px 9px;font-size:12px}
+button.danger{background:transparent;color:var(--err);border:1px solid var(--line)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.rule{border-left:3px solid var(--line);padding-left:12px;margin:14px 0}
+.rule.off{opacity:.45}
+.ifthen{font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);word-break:break-word}
+.ifthen b{color:var(--warn)}
+.meta{color:var(--mut);font-size:12px;margin-top:3px}
+.err{color:var(--err);font-size:13px}
+.ok{color:var(--ok);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td,th{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:500}
+code{font:12.5px ui-monospace,Menlo,monospace}
+.tag{font-size:11px;padding:1px 6px;border:1px solid var(--line);border-radius:20px;color:var(--mut)}
+h2{font-size:14px;margin:0 0 10px;color:var(--mut);font-weight:600}
+</style>
+<div class="wrap">
+  <h1>llm-trigger</h1>
+  <div class="sub">自然语言 → 结构化 <code>IF / THEN</code> 规则。编译器是 pi 上的本地模型；触发判定与执行不调用模型。</div>
+
+  <div class="card">
+    <h2>新触发器</h2>
+    <textarea id="text" rows="3" placeholder="例：当 github 上 c4pt0r/jmp2.io 有新 release 且不是预发布版时，POST 到 https://... 每小时查一次"></textarea>
+    <div class="row">
+      <button id="btnParse">编译预览</button>
+      <button id="btnSave" class="ghost">保存为规则</button>
+      <span id="msg"></span>
+    </div>
+    <div id="preview" style="display:none;margin-top:14px">
+      <div class="ifthen" id="rendered"></div>
+      <div class="meta" id="note"></div>
+      <div class="row"><button class="ghost sm" id="btnToggleJson">编辑结构化 JSON</button></div>
+      <textarea id="json" rows="12" style="display:none;margin-top:8px"></textarea>
+      <div class="row"><button class="sm" id="btnSaveJson" style="display:none">保存 JSON 修改</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>规则 (<span id="count">0</span>)</h2>
+    <div id="rules"></div>
+  </div>
+
+  <div class="card">
+    <h2>最近触发</h2>
+    <table><thead><tr><th>时间(UTC)</th><th>规则</th><th>状态</th><th>事件</th><th>详情</th></tr></thead><tbody id="fires"></tbody></table>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const api = async (p, opt = {}) => {
+  const res = await fetch(p, { ...opt, headers: { "content-type": "application/json", ...(opt.headers || {}) } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(body.error || res.statusText), { body });
+  return body;
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hl = (s) => esc(s).replace(/\b(IF|WHEN|EVERY|THEN)\b/g, "<b>$1</b>");
+let draft = null, editingId = null;
+
+async function refresh() {
+  const rules = await api("/api/rules");
+  $("#count").textContent = rules.length;
+  $("#rules").innerHTML = rules.map((r) => `
+    <div class="rule ${r.enabled ? "" : "off"}">
+      <div class="ifthen">${hl(r.rendered)}</div>
+      <div class="meta">“${esc(r.raw)}” · ${r.id} · last_check ${r.last_check_at ? new Date(r.last_check_at * 1000).toISOString().slice(5, 16).replace("T", " ") : "never"}
+        ${r.missing?.length ? `· <span class="tag">猜测: ${esc(r.missing.join(","))}</span>` : ""}</div>
+      <div class="row">
+        <button class="sm ghost" data-a="toggle" data-i="${r.id}" data-v="${r.enabled ? 0 : 1}">${r.enabled ? "停用" : "启用"}</button>
+        <button class="sm ghost" data-a="run" data-i="${r.id}">立即检查</button>
+        <button class="sm ghost" data-a="dry" data-i="${r.id}">试运行</button>
+        <button class="sm ghost" data-a="edit" data-i="${r.id}">改 JSON</button>
+        <button class="sm danger" data-a="del" data-i="${r.id}">删除</button>
+        <span class="msg" id="m-${r.id}"></span>
+      </div>
+    </div>`).join("") || '<div class="meta">还没有规则</div>';
+
+  const fires = await api("/api/fires?limit=30");
+  $("#fires").innerHTML = fires.map((f) => `<tr><td>${f.created_at.slice(5, 16).replace("T", " ")}</td><td><code>${f.rule_id}</code></td>
+    <td style="color:${f.status === "fired" ? "var(--ok)" : f.status === "error" ? "var(--err)" : "var(--mut)"}">${f.status}</td>
+    <td><code>${esc(f.key)}</code></td><td>${esc(f.detail ?? "")}</td></tr>`).join("") || '<tr><td colspan="5" class="meta">还没有记录</td></tr>';
+}
+
+function showPreview(r, ruleId) {
+  draft = r.rule; editingId = ruleId ?? null;
+  $("#preview").style.display = "block";
+  $("#rendered").innerHTML = hl(r.rendered);
+  $("#note").textContent = (r.note ? r.note + " " : "") + (r.missing?.length ? `（模型自行补全: ${r.missing.join(", ")}）` : "");
+  $("#json").value = JSON.stringify({ if: r.rule.if, then: r.rule.then }, null, 2);
+}
+
+$("#btnParse").onclick = async () => {
+  $("#msg").textContent = "编译中…"; $("#msg").className = "meta";
+  try { showPreview(await api("/api/parse", { method: "POST", body: JSON.stringify({ text: $("#text").value }) })); $("#msg").textContent = ""; }
+  catch (e) { $("#msg").className = "err"; $("#msg").textContent = (e.body?.errors ?? [e.message]).join(" / "); }
+};
+
+$("#btnSave").onclick = async () => {
+  $("#msg").textContent = "编译中…"; $("#msg").className = "meta";
+  try { const r = await api("/api/rules", { method: "POST", body: JSON.stringify({ text: $("#text").value }) }); $("#msg").className = "ok"; $("#msg").textContent = `已保存 ${r.id}`; showPreview(r); refresh(); }
+  catch (e) { $("#msg").className = "err"; $("#msg").textContent = (e.body?.errors ?? [e.message]).join(" / "); }
+};
+
+$("#btnToggleJson").onclick = () => { const s = $("#json").style.display === "none"; $("#json").style.display = s ? "block" : "none"; $("#btnSaveJson").style.display = s ? "inline-block" : "none"; };
+
+$("#btnSaveJson").onclick = async () => {
+  try { const body = JSON.parse($("#json").value); const r = await api(`/api/rules/${editingId}`, { method: "PUT", body: JSON.stringify(body) }); $("#msg").className = "ok"; $("#msg").textContent = `已更新 ${r.id}`; showPreview(r, r.id); refresh(); }
+  catch (e) { $("#msg").className = "err"; $("#msg").textContent = (e.body?.errors ?? [e.message]).join(" / "); }
+};
+
+$("#rules").onclick = async (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  const { a, i } = b.dataset, m = $(`#m-${i}`);
+  m.textContent = "…"; m.className = "msg meta";
+  try {
+    if (a === "toggle") await api(`/api/rules/${i}`, { method: "PATCH", body: JSON.stringify({ enabled: b.dataset.v === "1" }) });
+    else if (a === "run" || a === "dry") { const s = await api(`/api/rules/${i}/run`, { method: "POST", body: JSON.stringify({ dry: a === "dry" }) }); m.textContent = `${s.baseline ? "baseline" : `fresh=${s.fresh} matched=${s.matched} fired=${s.fired} errors=${s.errors}`}`; }
+    else if (a === "del") { if (!confirm(`删除 ${i}?`)) return; await api(`/api/rules/${i}`, { method: "DELETE" }); }
+    else if (a === "edit") { const r = await api(`/api/rules/${i}`); $("#text").value = r.raw; showPreview({ rule: { if: r.if, then: r.then }, rendered: r.rendered, note: r.note, missing: r.missing }, i); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    refresh();
+  } catch (e) { m.className = "err"; m.textContent = e.body?.error || e.message; }
+};
+
+refresh().catch((e) => { $("#msg").className = "err"; $("#msg").textContent = e.message; });
+</script>

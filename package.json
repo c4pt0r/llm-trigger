@@ -1,0 +1,13 @@
+{
+  "name": "llm-trigger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "自然语言 -> 结构化 IF/THEN 触发规则；编译器是 pi 上的本地模型，运行期零模型调用",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node src/server.js",
+    "cli": "node src/cli.js",
+    "test": "node --test test/run.js"
+  }
+}
