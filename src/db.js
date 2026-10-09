@@ -110,10 +110,24 @@ export function getSeen(db, id) {
 export function markSeen(db, id, keys) {
   if (!keys.length) return;
   const r = db.prepare("SELECT state_json FROM rules WHERE id = ?").get(id);
-  const seen = JSON.parse(r?.state_json ?? '{"seen":[]}').seen;
-  for (const k of keys) if (!seen.includes(k)) seen.push(k);
+  const state = JSON.parse(r?.state_json ?? '{"seen":[]}');
+  for (const k of keys) if (!state.seen.includes(k)) state.seen.push(k);
+  state.seen = state.seen.slice(-SEEN_CAP);
   db.prepare("UPDATE rules SET state_json = ?, last_check_at = ? WHERE id = ?")
-    .run(JSON.stringify({ seen: seen.slice(-SEEN_CAP) }), Math.floor(Date.now() / 1000), id);
+    .run(JSON.stringify(state), Math.floor(Date.now() / 1000), id);
+}
+
+// ---------- observe snapshots (kept beside `seen` in state_json) ----------
+export function getSnapshot(db, id) {
+  const r = db.prepare("SELECT state_json FROM rules WHERE id = ?").get(id);
+  return JSON.parse(r?.state_json ?? "{}").snapshot;
+}
+
+export function saveSnapshot(db, id, snapshot) {
+  const r = db.prepare("SELECT state_json FROM rules WHERE id = ?").get(id);
+  const state = JSON.parse(r?.state_json ?? '{"seen":[]}');
+  state.snapshot = snapshot;
+  db.prepare("UPDATE rules SET state_json = ? WHERE id = ?").run(JSON.stringify(state), id);
 }
 
 export function touchCheck(db, id) {

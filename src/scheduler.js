@@ -1,10 +1,12 @@
-// One process, one 60s tick. A rule runs only if its cron matched some minute
-// since its last check, so "0 8 * * *" costs one request per day, not per minute.
+// One process, one tick every LT_TICK_MS (default 60s). A rule runs only if its
+// cron matched some minute since its last check, so "0 8 * * *" costs one request
+// per day, not per tick. Ticking faster than 60s buys nothing (cron granularity
+// is one minute); slower is fine — the due-window catches skipped minutes.
 import { listRules } from "./db.js";
 import { cronDue } from "./cron.js";
 import { runRule } from "./engine.js";
 
-export function startScheduler(db, { intervalMs = 60_000, log = (m) => console.error(m) } = {}) {
+export function startScheduler(db, { intervalMs = Number(process.env.LT_TICK_MS) || 60_000, log = (m) => console.error(m) } = {}) {
   let busy = false;
   const tick = async () => {
     if (busy) return;

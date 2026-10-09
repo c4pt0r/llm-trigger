@@ -6,7 +6,10 @@
 import { spawn } from "node:child_process";
 
 export const PI_BIN = process.env.PI_BIN || "pi";
-export const PI_MODEL = process.env.LT_MODEL || `${process.env.PI_PROVIDER || ""}/${process.env.PI_MODEL || ""}`.replace(/^\//, "") || undefined;
+// Outside a pi session PI_PROVIDER/PI_MODEL are unset and pi's default provider
+// errors out on this machine, so fall back to the known-good local model.
+export const DEFAULT_MODEL = "strata/qwen3.8-flash-next-iq3_s";
+export const PI_MODEL = process.env.LT_MODEL || `${process.env.PI_PROVIDER || ""}/${process.env.PI_MODEL || ""}`.replace(/^\//, "") || DEFAULT_MODEL;
 
 export function piArgs({ system, user, model, thinking = "off" }) {
   const args = [
@@ -16,7 +19,11 @@ export function piArgs({ system, user, model, thinking = "off" }) {
     "--system-prompt", system,
   ];
   const m = model ?? PI_MODEL;
-  if (m) args.push("--model", m);
+  if (m) {
+    const i = m.indexOf("/"); // "provider/id" -> pi's canonical --provider X --model Y
+    if (i > 0) args.push("--provider", m.slice(0, i), "--model", m.slice(i + 1));
+    else args.push("--model", m);
+  }
   args.push("--", user);
   return args;
 }
@@ -46,7 +53,7 @@ export function piComplete(opts) {
       const finals = recs.filter((r) => r.type === "message_end" && r.message?.role === "assistant");
       const last = finals.at(-1);
       if (!last) return reject(new Error(`pi produced no assistant message (exit ${code})${err ? `: ${err.slice(0, 400)}` : ""}`));
-      if (last.message.stopReason === "error") return reject(new Error(`pi model error: ${last.message.errorMessage || "unknown"}`));
+      if (last.message.stopReason === "error") return reject(new Error(`pi model error: ${last.message.errorMessage || "unknown"} (model: ${last.message.provider || "?"}/${last.message.model || "?"} — override with LT_MODEL=provider/id)`));
       const text = (last.message.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
       if (!text) return reject(new Error(`pi returned empty text (stopReason=${last.message.stopReason})`));
       resolve({ text, model: last.message.model, provider: last.message.provider, usage: last.message.usage });

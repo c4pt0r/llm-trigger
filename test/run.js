@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { validateRule, evalRule, evalCondition, renderRule, factKey } from "../src/schema.js";
 import { parseCron, cronMatch, cronDue } from "../src/cron.js";
 import * as db from "../src/db.js";
@@ -101,12 +102,129 @@ test("engine: conditions gate the action, and dry run never acts", async () => {
   assert.equal(s.results.find((r) => r.key === "v2.0.0-rc1").status, "no_match");
 });
 
+test("agent op: validated, rendered, and judged at fire time via injected judge", async () => {
+  // validator: "*" and real fields allowed, empty question rejected
+  const withAgent = { ...good, if: { ...good.if, when: [{ field: "prerelease", op: "eq", value: false }, { field: "*", op: "agent", value: "这个 release 是否包含安全修复?" }] } };
+  const v = validateRule(withAgent);
+  assert.ok(v.ok, v.errors.join("; "));
+  assert.match(v.rendered, /\* agent "这个 release 是否包含安全修复\?"/);
+  assert.equal(validateRule({ ...good, if: { ...good.if, when: [{ field: "*", op: "agent", value: " " }] } }).ok, false);
+  assert.equal(validateRule({ ...good, if: { ...good.if, when: [{ field: "*", op: "eq", value: 1 }] } }).ok, false, "* is only for agent");
+
+  // deterministic evalRule ignores agent conditions; engine judges them via `judge`
+  const d = db.open(":memory:");
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([rel("v3.0.0"), rel("v3.1.0"), rel("v3.2.0-rc1", true)]) });
+  const rule = db.insertRule(d, { raw: "安全修复才触发", rule: v.rule });
+
+  const asked = [];
+  const judge = async (conds, fact) => { asked.push(fact.tag); return { yes: fact.tag === "v3.1.0", why: fact.tag === "v3.1.0" ? "提到 CVE" : "无安全内容" }; };
+  const s = await runRule(d, rule, { force: true, judge });
+  assert.deepEqual(asked.sort(), ["v3.0.0", "v3.1.0"], "judge runs only on facts that passed deterministic conditions");
+  assert.equal(s.fired, 1);
+  assert.ok(s.results.find((r) => r.key === "v3.1.0").detail.includes("judge"));
+  assert.equal(s.results.find((r) => r.key === "v3.0.0").status, "no_match");
+
+  // judge failure -> error status, not fired
+  const rule2 = db.insertRule(d, { raw: "x", rule: v.rule });
+  const s2 = await runRule(d, rule2, { force: true, judge: async () => { throw new Error("model down"); } });
+  assert.equal(s2.fired, 0);
+  assert.equal(s2.errors, 2); // two facts pass the deterministic filter, both judgements fail
+  assert.ok(s2.results.every((r) => r.status === "error" || r.status === "no_match"));
+});
+
+test("script op: gated by ALLOW_SHELL, fact arrives on stdin, exit code decides", async () => {
+  const { judgeConditions } = await import("../src/judge.js");
+  const conds = [{ field: "*", op: "script", value: `grep -q '"prerelease":false'` }];
+
+  // validator: same rules as agent (field "*", non-empty command)
+  assert.ok(validateRule({ ...good, if: { ...good.if, when: conds } }).ok);
+  assert.equal(validateRule({ ...good, if: { ...good.if, when: [{ field: "*", op: "script", value: "" }] } }).ok, false);
+
+  const prev = process.env.ALLOW_SHELL;
+  delete process.env.ALLOW_SHELL;
+  await assert.rejects(() => judgeConditions(conds, { prerelease: false }), /ALLOW_SHELL/);
+
+  process.env.ALLOW_SHELL = "1";
+  const y = await judgeConditions(conds, { prerelease: false }); // grep hits -> exit 0 -> pass
+  const n = await judgeConditions(conds, { prerelease: true });
+  assert.equal(y.yes, true);
+  assert.equal(n.yes, false);
+  assert.match(n.why, /exit 1/);
+  if (prev === undefined) delete process.env.ALLOW_SHELL; else process.env.ALLOW_SHELL = prev;
+});
+
+test("observe: snapshot diff feeds the judge previous+content, unchanged costs nothing", async () => {
+  const obsRule = {
+    if: {
+      source: "observe", event: "observe.changed",
+      target: { what: "竞品降价了", url: "https://x/pricing" },
+      when: [{ field: "*", op: "agent", value: "对比 previous 和 content，价格是否下降了？" }],
+      every: "*/10 * * * *",
+    },
+    then: { action: "log", params: { text: "降价了: {{content}}" } },
+  };
+  // validator: url or command is mandatory, "what" always
+  assert.ok(validateRule(obsRule).ok, validateRule(obsRule).errors.join("; "));
+  assert.equal(validateRule({ ...obsRule, if: { ...obsRule.if, target: { what: "x" } } }).ok, false, "needs url or command");
+
+  const d = db.open(":memory:");
+  let page = "Pro plan: $99/mo";
+  globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => "text/plain" }, text: async () => page });
+  const rule = db.insertRule(d, { raw: "盯着竞品定价页", rule: obsRule });
+
+  const seenByJudge = [];
+  const judge = async (conds, fact) => {
+    seenByJudge.push({ prev: fact.previous, cur: fact.content });
+    const drop = fact.previous.includes("$99") && fact.content.includes("$89");
+    return { yes: drop, why: drop ? "99 -> 89" : "未下降" };
+  };
+
+  const s1 = await runRule(d, rule, { judge }); // first check: baseline, no judging
+  assert.equal(s1.baseline, true);
+  assert.equal(seenByJudge.length, 0, "baseline must not judge");
+
+  const s2 = await runRule(d, db.getRule(d, rule.id), { judge }); // unchanged: digest seen, zero judge calls
+  assert.equal(s2.fresh, 0);
+  assert.equal(seenByJudge.length, 0, "unchanged snapshot must not judge");
+
+  page = "Pro plan: $89/mo"; // price drop
+  const s3 = await runRule(d, db.getRule(d, rule.id), { judge });
+  assert.equal(s3.fired, 1);
+  assert.deepEqual(seenByJudge.at(-1), { prev: "Pro plan: $99/mo", cur: "Pro plan: $89/mo" }, "judge sees both snapshots");
+
+  page = "Pro plan: $120/mo"; // price up: fresh fact, judge says no
+  const s4 = await runRule(d, db.getRule(d, rule.id), { judge });
+  assert.equal(s4.fresh, 1);
+  assert.equal(s4.fired, 0);
+  assert.equal(s4.results[0].status, "no_match");
+});
+
 test("pi backend runs tool-less and pins the current model", () => {
   const a = piArgs({ system: "s", user: "u", model: "strata/qwen3.8-flash-next-iq3_s" });
   assert.ok(a.includes("-nt") && a.includes("-ns") && a.includes("-nc"));
   assert.ok(a.includes("--no-session"));
-  assert.equal(a[a.indexOf("--model") + 1], "strata/qwen3.8-flash-next-iq3_s");
+  // "provider/id" is split into pi's canonical --provider X --model Y form
+  assert.equal(a[a.indexOf("--provider") + 1], "strata");
+  assert.equal(a[a.indexOf("--model") + 1], "qwen3.8-flash-next-iq3_s");
   assert.equal(a.at(-2), "--");
+});
+
+test("server: API routes match when the URL has a query string", async () => {
+  const { createServer } = await import("../src/server.js");
+  const { server } = createServer(":memory:", { quiet: true });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  const get = (path) => new Promise((resolve, reject) =>
+    http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+      let s = "";
+      res.on("data", (c) => (s += c));
+      res.on("end", () => resolve({ status: res.statusCode, body: s }));
+    }).on("error", reject));
+
+  assert.equal((await get("/api/fires?limit=5")).status, 200);
+  assert.equal((await get("/api/rules?x=1")).status, 200);
+  assert.equal((await get("/api/nope?x=1")).status, 404);
+  server.close();
 });
 
 const rel = (tag, prerelease = false) => ({ tag_name: tag, name: tag, html_url: `https://x/${tag}`, published_at: "2026-10-01T00:00:00Z", prerelease, body: "" });

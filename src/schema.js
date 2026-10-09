@@ -1,7 +1,9 @@
 // Rule shape, validation, rendering ("IF ... THEN ...") and deterministic evaluation.
 import { EVENTS, SOURCES, OPS, ACTIONS } from "./catalog.js";
 
-export const DEFAULT_EVERY = "*/10 * * * *";
+// Default poll cadence for rules whose sentence gave no rhythm. LT_EVERY must be
+// 5-field cron; an invalid value is caught by validateRule on the first compile.
+export const DEFAULT_EVERY = process.env.LT_EVERY || "*/10 * * * *";
 
 /** Validate an untrusted object (LLM output / user JSON edit) against the catalog. */
 export function validateRule(input) {
@@ -27,8 +29,10 @@ export function validateRule(input) {
     }
     if (ev.source === "github" && target.repo && !/^[\w.-]+\/[\w.-]+$/.test(String(target.repo)))
       errors.push(`if.target.repo must look like "owner/name", got "${target.repo}"`);
-    if (ev.source === "http" && target.url && !/^https?:\/\//.test(String(target.url)))
+    if ((ev.source === "http" || ev.source === "observe") && target.url && !/^https?:\/\//.test(String(target.url)))
       errors.push(`if.target.url must start with http(s)://`);
+    if (ev.source === "observe" && !target.url && !target.command)
+      errors.push(`if.target needs "url" or "command" for source "observe"`);
   }
 
   const when = i.when ?? [];
@@ -37,13 +41,16 @@ export function validateRule(input) {
     when.forEach((c, n) => {
       if (!c || typeof c !== "object") return errors.push(`if.when[${n}] must be an object`);
       if (!ev) return;
-      if (!Object.hasOwn(ev.fields, c.field))
-        errors.push(`if.when[${n}].field "${c.field}" is not a field of ${i.event}; allowed: ${Object.keys(ev.fields).join(", ")}`);
+      const judged = c.op === "agent" || c.op === "script"; // slow judges may look at the whole event
+      if (!Object.hasOwn(ev.fields, c.field) && !(judged && c.field === "*"))
+        errors.push(`if.when[${n}].field "${c.field}" is not a field of ${i.event}; allowed: ${Object.keys(ev.fields).join(", ")}${judged ? ", *" : ""}`);
       if (!OPS[c.op]) errors.push(`if.when[${n}].op must be one of: ${Object.keys(OPS).join(", ")}`);
       else if (OPS[c.op].args === 1 && c.value === undefined) errors.push(`if.when[${n}].value is required for op "${c.op}"`);
       if (c.op === "matches" && c.value !== undefined) {
         try { new RegExp(String(c.value)); } catch (e) { errors.push(`if.when[${n}].value is not a valid regex: ${e.message}`); }
       }
+      if (judged && (typeof c.value !== "string" || !c.value.trim()))
+        errors.push(`if.when[${n}].value must be a non-empty ${c.op === "agent" ? "yes/no question" : "command"} for op "${c.op}"`);
     });
   }
 
@@ -125,8 +132,16 @@ export function evalCondition(cond, fact) {
   }
 }
 
+const JUDGED_OPS = new Set(["agent", "script"]);
+
+/** Slow conditions judged at check time (local model / local script), not by evalCondition. */
+export function judgedConditions(rule) {
+  return (rule.if.when ?? []).filter((c) => JUDGED_OPS.has(c.op));
+}
+
+/** Deterministic conditions only; judged conditions run separately in the engine. */
 export function evalRule(rule, fact) {
-  return (rule.if.when ?? []).every((c) => evalCondition(c, fact));
+  return (rule.if.when ?? []).filter((c) => !JUDGED_OPS.has(c.op)).every((c) => evalCondition(c, fact));
 }
 
 export function factKey(rule, fact) {

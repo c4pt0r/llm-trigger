@@ -1,6 +1,10 @@
 // Fact providers. Each returns an array of plain fact objects (newest first)
 // whose keys are exactly the fields declared in catalog.js for that event.
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+
 const UA = "llm-trigger/0.1";
+const SNAP_CAP = 20_000; // chars kept per snapshot; both previous+content go into the judge prompt
 
 async function getJson(url, headers = {}) {
   const res = await fetch(url, { headers: { "user-agent": UA, accept: "application/vnd.github+json", ...headers }, signal: AbortSignal.timeout(20_000) });
@@ -65,10 +69,62 @@ function time() {
   return [{ now: iso.slice(0, 16) + "Z", date: iso.slice(0, 10), time: iso.slice(11, 16), weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] }];
 }
 
-export async function fetchFacts(rule) {
+// Good-enough HTML -> text so the judge reads prose, not markup.
+function stripHtml(s) {
+  return s
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => ({ "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " }[m]))
+    .replace(/\s+/g, " ");
+}
+
+function runCommand(command, timeoutMs = 30_000) {
+  if (process.env.ALLOW_SHELL !== "1") throw new Error(`observe command needs ALLOW_SHELL=1 (command: ${command})`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "", settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; child.kill("SIGKILL"); reject(new Error(`observe command timed out after ${timeoutMs}ms`)); } }, timeoutMs);
+    child.stdout.on("data", (b) => (out += b));
+    child.stderr.on("data", (b) => (err += b));
+    child.on("error", (e) => { if (!settled) { settled = true; clearTimeout(timer); reject(e); } });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`observe command exit ${code}: ${(err || out).slice(0, 200)}`));
+      resolve(out);
+    });
+  });
+}
+
+// Open-world observation: snapshot whatever the url/command yields, diff against the
+// previous snapshot (passed in by the engine from rule state). One fact per check;
+// its digest is the dedup key, so an unchanged snapshot never reaches the judges.
+async function observe(target, previous) {
+  let content;
+  if (target.url) {
+    const res = await fetch(String(target.url), { headers: { "user-agent": UA }, signal: AbortSignal.timeout(20_000) });
+    content = await res.text();
+    if (/html/i.test(res.headers?.get?.("content-type") ?? "") || /^\s*<(!doctype|html)/i.test(content)) content = stripHtml(content);
+  } else {
+    content = await runCommand(String(target.command));
+  }
+  content = content.trim().slice(0, SNAP_CAP);
+  const digest = createHash("sha1").update(content).digest("hex").slice(0, 12);
+  return [{
+    what: target.what,
+    content,
+    previous: previous ?? "",
+    changed: previous !== undefined && previous !== content,
+    digest,
+    url: String(target.url ?? target.command),
+  }];
+}
+
+export async function fetchFacts(rule, { previous } = {}) {
   const { source, event, target } = rule.if;
   if (source === "github") return github(target, event);
   if (source === "http") return http(target);
   if (source === "time") return time();
+  if (source === "observe") return observe(target, previous);
   throw new Error(`no provider for source "${source}"`);
 }

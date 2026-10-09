@@ -6,6 +6,7 @@ export const SOURCES = {
   github: { required: ["repo"], optional: ["token_env"], note: "repo = owner/name" },
   http: { required: ["url"], optional: ["path", "headers"], note: "path = dot path into JSON body" },
   time: { required: [], optional: [], note: "pure schedule, no external fact" },
+  observe: { required: ["what"], optional: ["url", "command"], note: "开放观察：url 或 command 必须给一个；what = 用户想盯的事（原话）。command 需 ALLOW_SHELL=1" },
 };
 
 // event -> { source, summary, fields, key }
@@ -59,6 +60,12 @@ export const EVENTS = {
     fields: { now: "datetime", date: "string", time: "string", weekday: "string" },
     key: ["now"],
   },
+  "observe.changed": {
+    source: "observe",
+    summary: "通用观察：轮询 url（或本地命令输出）做快照，内容变化时触发；fact 带 previous/content 两个快照，配合 agent 条件判定“用户描述的事是否发生”",
+    fields: { what: "string", content: "string", previous: "string", changed: "bool", digest: "string", url: "string" },
+    key: ["digest"],
+  },
 };
 
 export const OPS = {
@@ -73,6 +80,8 @@ export const OPS = {
   lte: { args: 1, note: "数值/日期小于等于" },
   in: { args: 1, note: "value 是数组：字段值落在集合内" },
   exists: { args: 0, note: "字段存在且非空" },
+  agent: { args: 1, note: "语义判定：value 是一句 yes/no 问题，检查时由本地模型对事件裁决；field 可为具体字段或 * 表示整个事件。运行期唯一会调模型的 op，仅对通过确定性条件的新事件调用" },
+  script: { args: 1, note: "脚本判定：value 是本地命令，事件 JSON 从 stdin 传入（LT_EVENT/LT_FIELD 环境变量带上下文），退出码 0 = 通过。需 ALLOW_SHELL=1；field 可为具体字段或 *。仅对通过确定性条件的新事件调用" },
 };
 
 export const ACTIONS = {

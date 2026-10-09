@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 // CLI: the same pipeline as the HTTP API, for quick terminal use.
 import * as db from "./db.js";
 import { compileTrigger } from "./parse.js";
@@ -38,7 +38,7 @@ async function main() {
       if (!r.ok) return fail(r.errors);
       const rule = db.insertRule(d, { raw: text, rule: r.rule, note: r.note, missing: r.missing, model: r.model });
       printCompiled(r, rule.id, text);
-      if (flags.run) console.log(JSON.stringify(await runRule(d, rule, { force: flags.all }), null, 2));
+      if (flags.run) report(await runRule(d, rule, { force: flags.all }));
       break;
     }
     case "edit": {

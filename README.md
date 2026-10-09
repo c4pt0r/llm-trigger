@@ -21,6 +21,13 @@ Natural language in, structured rule out. Input can be Chinese or English; the s
 | Rule validity | `src/schema.js` validator, checked against the catalog in `src/catalog.js` | every write |
 | Event detection + action execution | `src/engine.js` + `src/sources.js` + `src/actions.js`, plain code | every cron hit |
 
+Conditions come in three tiers. Deterministic ops (`eq`/`contains`/...) are pure code. On top of them a rule may opt into **slow judges**, which run only on **fresh** facts that already passed the deterministic filters, at most once per event (dedup), never during baseline:
+
+- `script` — a local command; the event JSON arrives on stdin, exit code 0 = pass (`LT_EVENT`/`LT_FIELD` in env). Gated by `ALLOW_SHELL=1`, like the `shell.exec` action.
+- `agent` — the local model answers a yes/no question about the event ("看起来包含安全修复？"); the verdict and its reason are logged in `fires`.
+
+Scripts run before the model and short-circuit, so an `agent` condition behind a failing `script` costs nothing.
+
 This is what makes "firing" reproducible, auditable and testable: a model can't hallucinate a POST to your webhook at 3am. The model may only pick events/fields/ops/actions that are **actually implemented** in `catalog.js`; if the sentence isn't expressible, it refuses outright:
 
 ```
@@ -37,12 +44,12 @@ When validation fails, the errors are fed back to the model for one repair round
 
 ```
 pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
-   --model $PI_PROVIDER/$PI_MODEL --system-prompt <compiler prompt> -- <natural language>
+   --provider <provider> --model <id> --system-prompt <compiler prompt> -- <natural language>
 ```
 
 - `-nt -ns -np -nc` disables tools / skills / prompt templates / AGENTS.md. One compile costs ~60 input tokens and ~1s.
-- The model defaults to the **current pi session model** (`PI_PROVIDER/PI_MODEL`). Without an explicit `--model`, pi falls back to its configured default provider, which on this machine fails with `Connection error.` — so `pi.js` pins it deliberately.
-- Override with `LT_MODEL=provider/id`.
+- Model resolution: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else the built-in fallback `strata/qwen3.8-flash-next-iq3_s` — pi's configured default provider fails on this machine with `Connection error.`, so `pi.js` always pins one explicitly.
+- Cron is UTC, but the compiler prompt carries the machine's timezone so "每天早上9点" is converted to the right UTC cron line.
 
 ## Storage (SQLite via Node 22's built-in `node:sqlite`, zero dependencies)
 
@@ -65,11 +72,14 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 | `github.star.count` | github | stars | stars,url |
 | `http.json.changed` | http | value | value,status,url |
 | `time.schedule` | time | now | now,date,time,weekday |
+| `observe.changed` | observe | digest | what,content,previous,changed,digest,url |
 
-Condition ops: `eq ne contains not_contains matches gt gte lt lte in exists`
+Condition ops: `eq ne contains not_contains matches gt gte lt lte in exists` + slow judges `script` (local command, exit 0 = pass, needs `ALLOW_SHELL=1`) and `agent` (yes/no judged by the local model); for both, `field` may be `*` for the whole event
 Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec` (requires `ALLOW_SHELL=1`)
 
 Adding an event = one line in `catalog.js` (fields + dedup key) + one branch in `sources.js`. The validator and the prompt follow automatically, because all three read the same catalog.
+
+`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("竞品降价了", "文档的 API 章节改了"): it snapshots a URL (HTML stripped to text) or a local command's output (`ALLOW_SHELL=1` gated), diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
 
 ## Usage
 

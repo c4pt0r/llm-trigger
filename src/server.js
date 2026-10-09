@@ -90,7 +90,7 @@ export function createServer(dbPath, { quiet = false } = {}) {
     try {
       for (const [method, re, handler] of routes) {
         if (req.method !== method) continue;
-        const m = url.match(re);
+        const m = url.split("?")[0].match(re); // match on the path only; query goes to url.searchParams
         if (!m) continue;
         const body = ["POST", "PUT", "PATCH"].includes(req.method) ? await readBody(req) : {};
         const out = await handler(m, body, new URL(url, "http://x"));
