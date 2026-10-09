@@ -69,8 +69,9 @@ async function main() {
       db.setEnabled(d, args[0], cmd === "on"); console.log(`${args[0]} ${cmd}`);
       break;
     }
-    case "rm": {
-      console.log(db.deleteRule(d, args[0]) ? `deleted ${args[0]}` : "no such rule");
+    case "rm": case "del": case "delete": {
+      if (!args.length) return usage();
+      for (const id of args) console.log(db.deleteRule(d, id) ? `deleted ${id}` : `no such rule: ${id}`);
       break;
     }
     case "run": {
@@ -137,7 +138,8 @@ function usage() {
   llm-trigger add "<sentence>" [--run [--all]]   compile and store as a rule
   llm-trigger parse "<sentence>"                 compile only, do not store
   llm-trigger edit <id> "<sentence>"             recompile and overwrite
-  llm-trigger list | show <id> | on|off <id> | rm <id>
+  llm-trigger list | show <id> | on|off <id>
+  llm-trigger rm <id> [<id>...]                  delete trigger(s); del/delete work too
   llm-trigger run <id> [--dry] [--all]           check once now (--all = ignore dedup history, replay all events)
   llm-trigger run-all [--dry] | fires [id] [--limit N] | stats | events | actions
   llm-trigger serve [--port 8787] [-d]           HTTP API + web UI + scheduler; blocks and logs
