@@ -1,7 +1,13 @@
-// Action executors. Everything here is deterministic: it only renders {{field}}
-// from the fact and calls out. No model in the loop.
+// Action executors. log/webhook/shell are deterministic: they only render
+// {{field}} from the fact and call out. agent.run is the one exception — it
+// hands the event to the local agent WITH TOOLS; like shell.exec it is gated
+// by ALLOW_SHELL=1, because an agent with tools is at least as powerful as a shell.
 import { spawnSync } from "node:child_process";
 import { renderTemplate } from "./schema.js";
+import { agentComplete } from "./agent.js";
+
+const EXEC_SYSTEM = `You are the executor of a trigger system. A rule just fired on an event; carry out the task below using the tools you have.
+Act, don't ask — there is no user to answer questions. Reply in the end with one short line describing what you did (it is logged).`;
 
 const UA = "llm-trigger/0.1";
 
@@ -38,6 +44,17 @@ export async function runAction(rule, fact) {
       const p = spawnSync("/bin/bash", ["-c", cmd], { encoding: "utf8", timeout: 60_000 });
       const out = (p.stdout || p.stderr || "").trim().slice(0, 500);
       return p.status === 0 ? { status: "fired", detail: `$ ${cmd} -> ${out || "ok"}` } : { status: "error", detail: `$ ${cmd} -> exit ${p.status} ${out}` };
+    }
+
+    case "agent.run": {
+      if (process.env.ALLOW_SHELL !== "1") return { status: "skipped", detail: "agent.run needs ALLOW_SHELL=1 on the server (an agent with tools can run commands)" };
+      const task = r(params.task);
+      try {
+        const res = await agentComplete({ exec: true, system: EXEC_SYSTEM, user: `Task:\n${task}\n\nEvent:\n${JSON.stringify(fact)}` });
+        return { status: "fired", detail: `agent: ${res.text.replace(/\s+/g, " ").slice(0, 300)}` };
+      } catch (e) {
+        return { status: "error", detail: `agent.run failed: ${e.message}` };
+      }
     }
 
     default:

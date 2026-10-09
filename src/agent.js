@@ -23,6 +23,10 @@ export const PRESETS = {
       "--thinking", "{thinking}", "--system-prompt", "{system}",
       "--provider", "{provider}", "--model", "{modelId}", "--", "{user}"],
     output: "pi-jsonl",
+    // Executor mode (the agent.run action): tools stay enabled so the agent can act.
+    execArgs: ["-p", "--no-session", "--thinking", "{thinking}", "--system-prompt", "{system}",
+      "--provider", "{provider}", "--model", "{modelId}", "--", "{user}"],
+    execOutput: "text",
     // LT_MODEL wins, else the current pi session's model (PI_PROVIDER/PI_MODEL,
     // only set inside a pi session), else nothing: the --provider/--model args
     // drop out and pi uses whatever default the local pi config has.
@@ -94,12 +98,16 @@ export function parseAgentOutput(mode, stdout, exitCode, stderr = "") {
   return { text, model: undefined, provider: undefined, usage: undefined };
 }
 
-/** One agent run -> reply text. Throws on agent error / timeout. */
+/** One agent run -> reply text. Throws on agent error / timeout.
+ *  opts.exec = executor mode: uses execArgs/execOutput (tools enabled) when the
+ *  agent defines them, falling back to the tool-less compile/judge invocation. */
 export function agentComplete(opts) {
   const agent = opts.agent ?? AGENT;
-  const timeoutMs = opts.timeoutMs ?? agent.timeoutMs ?? 120_000;
+  const timeoutMs = opts.timeoutMs ?? agent.timeoutMs ?? (opts.exec ? 300_000 : 120_000);
+  const args = opts.exec && agent.execArgs ? { ...agent, args: agent.execArgs } : agent;
+  const output = opts.exec && agent.execOutput ? agent.execOutput : agent.output;
   return new Promise((resolve, reject) => {
-    const child = spawn(agent.cmd, buildArgs(agent, opts), { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(agent.cmd, buildArgs(args, opts), { stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "", settled = false;
     const timer = setTimeout(() => { if (!settled) { settled = true; child.kill("SIGKILL"); reject(new Error(`agent ${agent.name} timed out after ${timeoutMs}ms`)); } }, timeoutMs);
     child.stdout.on("data", (b) => (out += b.toString("utf8")));
@@ -109,7 +117,7 @@ export function agentComplete(opts) {
       if (settled) return;
       settled = true; clearTimeout(timer);
       try {
-        const r = parseAgentOutput(agent.output, out, code, err);
+        const r = parseAgentOutput(output, out, code, err);
         resolve({ ...r, model: r.model ?? agent.name });
       } catch (e) { reject(e); }
     });

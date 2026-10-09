@@ -87,11 +87,23 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 | `observe.changed` | observe | digest | what,content,previous,changed,digest,url |
 
 Condition ops: `eq ne contains not_contains matches gt gte lt lte in exists` + slow judges `script` (local command, exit 0 = pass, needs `ALLOW_SHELL=1`) and `agent` (yes/no judged by the local model); for both, `field` may be `*` for the whole event
-Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec` (requires `ALLOW_SHELL=1`)
+Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec`, `agent.run` (hand the fired event to the local agent **with tools** and let it carry out a task — send an email, file a ticket; like `shell.exec` it needs `ALLOW_SHELL=1`, because an agent with tools is at least as powerful as a shell)
 
 Adding an event = one line in `catalog.js` (fields + dedup key) + one branch in `sources.js`. The validator and the prompt follow automatically, because all three read the same catalog.
 
 `observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output (`ALLOW_SHELL=1` gated), diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
+
+The three open-world pieces compose. One sentence —
+
+```
+$ llm-trigger add "when hackernews frontpage has any fund raising news, notify me in email huangdongxu1987@gmail.com"
+IF observe.changed (what=fund raising news on Hacker News frontpage url=https://news.ycombinator.com/)
+WHEN * agent "comparing previous and content, did any fund raising news appear on the Hacker News frontpage?"
+EVERY "*/10 * * * *"
+THEN agent.run(task="Send an email to huangdongxu1987@gmail.com ... Include the relevant headlines and links: {{content}}")
+```
+
+— becomes: snapshot diff (free) → semantic judge (one yes/no call on change) → executor agent with tools does the actual emailing.
 
 ## Install
 

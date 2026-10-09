@@ -227,6 +227,24 @@ test("observe: snapshot diff feeds the judge previous+content, unchanged costs n
   assert.equal(s4.results[0].status, "no_match");
 });
 
+test("agent.run action: validated, gated by ALLOW_SHELL, exec args keep tools enabled", async () => {
+  const { runAction } = await import("../src/actions.js");
+  const withAgentRun = { ...good, then: { action: "agent.run", params: { task: "email me about {{tag}}" } } };
+  assert.ok(validateRule(withAgentRun).ok);
+  assert.equal(validateRule({ ...good, then: { action: "agent.run", params: {} } }).ok, false, "task is required");
+
+  const prev = process.env.ALLOW_SHELL;
+  delete process.env.ALLOW_SHELL;
+  const out = await runAction(validateRule(withAgentRun).rule, { tag: "v1" });
+  assert.equal(out.status, "skipped", "no ALLOW_SHELL -> skipped, agent never spawned");
+  if (prev !== undefined) process.env.ALLOW_SHELL = prev;
+
+  // executor invocation keeps tools: no -nt/-ns in pi exec args
+  const exec = buildArgs({ ...PRESETS.pi, args: PRESETS.pi.execArgs }, { system: "s", user: "u" });
+  assert.ok(!exec.includes("-nt") && !exec.includes("-ns"));
+  assert.ok(exec.includes("--system-prompt"));
+});
+
 test("agent backend: pi preset runs tool-less and pins the model; custom configs substitute and drop empty flags", () => {
   const a = buildArgs(PRESETS.pi, { system: "s", user: "u", model: "strata/qwen3.8-flash-next-iq3_s" });
   assert.ok(a.includes("-nt") && a.includes("-ns") && a.includes("-nc"));

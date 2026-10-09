@@ -102,6 +102,12 @@ export const ACTIONS = {
     note: "run a local command; enabled only when the server runs with ALLOW_SHELL=1",
     gated: "ALLOW_SHELL",
   },
+  "agent.run": {
+    params: { task: "template" },
+    required: ["task"],
+    note: "hand the fired event to the local agent WITH TOOLS and let it carry out the task (send an email, file a ticket, ...). Use when no other action can do what the user asked. Needs ALLOW_SHELL=1",
+    gated: "ALLOW_SHELL",
+  },
 };
 
 // {{field}} templates are rendered from the fact object.
