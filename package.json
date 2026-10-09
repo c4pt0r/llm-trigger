@@ -1,9 +1,11 @@
 {
   "name": "llm-trigger",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "自然语言 -> 结构化 IF/THEN 触发规则；编译器是 pi 上的本地模型，运行期零模型调用",
+  "description": "Natural language -> structured IF/THEN trigger rules; compiled by a local model via pi, fired deterministically",
+  "bin": { "llm-trigger": "src/cli.js" },
+  "files": ["src", "public", "README.md"],
+  "repository": "github:c4pt0r/llm-trigger",
   "engines": { "node": ">=22.5" },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",

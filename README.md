@@ -3,11 +3,10 @@
 Describe a trigger in natural language, store it as a structured `IF / THEN` rule, and let an engine that **never calls a model** evaluate and execute it on a cron schedule.
 
 ```
-$ node src/cli.js add "当 github 上 c4pt0r/jmp2.io 有新 release 而且不是预发布版时，记一条日志"
-id: r_015fbbf9
-IF/THEN: IF github.release.published (repo=c4pt0r/jmp2.io) WHEN prerelease eq false EVERY "*/10 * * * *" THEN log(text="新 release {{tag}}: {{url}}")
-note: 当 c4pt0r/jmp2.io 发布非预发布版的新 release 时，记录一条日志。
-guessed: every
+$ llm-trigger add "when github repo c4pt0r/jmp2.io publishes a new release that is not a prerelease, log it"
+id: r_7dcc60f4
+IF/THEN: IF github.release.published (repo=c4pt0r/jmp2.io) WHEN prerelease eq false EVERY "*/10 * * * *" THEN log(text="New release {{tag}}: {{url}}")
+note: Log when a new non-prerelease is published in c4pt0r/jmp2.io.
 model: qwen3.8-flash-next-iq3_s
 ```
 
@@ -24,16 +23,17 @@ Natural language in, structured rule out. Input can be Chinese or English; the s
 Conditions come in three tiers. Deterministic ops (`eq`/`contains`/...) are pure code. On top of them a rule may opt into **slow judges**, which run only on **fresh** facts that already passed the deterministic filters, at most once per event (dedup), never during baseline:
 
 - `script` — a local command; the event JSON arrives on stdin, exit code 0 = pass (`LT_EVENT`/`LT_FIELD` in env). Gated by `ALLOW_SHELL=1`, like the `shell.exec` action.
-- `agent` — the local model answers a yes/no question about the event ("看起来包含安全修复？"); the verdict and its reason are logged in `fires`.
+- `agent` — the local model answers a yes/no question about the event ("does this look like a security fix?"); the verdict and its reason are logged in `fires`.
 
 Scripts run before the model and short-circuit, so an `agent` condition behind a failing `script` costs nothing.
 
 This is what makes "firing" reproducible, auditable and testable: a model can't hallucinate a POST to your webhook at 3am. The model may only pick events/fields/ops/actions that are **actually implemented** in `catalog.js`; if the sentence isn't expressible, it refuses outright:
 
 ```
-$ node src/cli.js parse "当我飞书里收到老板消息时提醒我喝水"
+$ llm-trigger parse "remind me to drink water when my boss messages me on Slack"
 rejected:
-- model refused: The catalog does not support monitoring incoming messages from Feishu (Lark)...
+- model refused: The catalog does not support Slack message events. A source and event for
+  monitoring Slack messages (e.g., 'slack.message.received') would be needed.
 ```
 
 When validation fails, the errors are fed back to the model for one repair round (`maxRounds`). If it is still invalid, the API returns 422 — a half-valid rule is never stored.
@@ -49,7 +49,7 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 
 - `-nt -ns -np -nc` disables tools / skills / prompt templates / AGENTS.md. One compile costs ~60 input tokens and ~1s.
 - Model resolution: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else the built-in fallback `strata/qwen3.8-flash-next-iq3_s` — pi's configured default provider fails on this machine with `Connection error.`, so `pi.js` always pins one explicitly.
-- Cron is UTC, but the compiler prompt carries the machine's timezone so "每天早上9点" is converted to the right UTC cron line.
+- Cron is UTC, but the compiler prompt carries the machine's timezone, so "every morning at 9" (or "每天早上9点" — input can be Chinese or English) is converted to the right UTC cron line.
 
 ## Storage (SQLite via Node 22's built-in `node:sqlite`, zero dependencies)
 
@@ -79,18 +79,30 @@ Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec` (requires `ALLOW_SH
 
 Adding an event = one line in `catalog.js` (fields + dedup key) + one branch in `sources.js`. The validator and the prompt follow automatically, because all three read the same catalog.
 
-`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("竞品降价了", "文档的 API 章节改了"): it snapshots a URL (HTML stripped to text) or a local command's output (`ALLOW_SHELL=1` gated), diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
+`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output (`ALLOW_SHELL=1` gated), diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
+
+## Install
+
+Needs Node >= 22.5 and the `pi` CLI with a working local model.
+
+```bash
+npm install -g github:c4pt0r/llm-trigger
+# or hack on a checkout:
+git clone https://github.com/c4pt0r/llm-trigger && cd llm-trigger && npm link
+```
+
+The database lives in `~/.llm-trigger/llm-trigger.db` for a global install, or `./data/` in a dev checkout; override with `LT_DB=path`.
 
 ## Usage
 
 ```bash
-npm run cli -- add "有人在 c4pt0r/jmp2.io 提 PR，标题带 OOM 且不是 draft，就 POST 到 https://x/hook，每小时查一次"
-npm run cli -- list
-npm run cli -- run <id> --dry        # evaluate but do not execute actions
-npm run cli -- run <id> --all        # ignore dedup history, replay every known event
-npm run cli -- fires <id> --limit 20
-npm run cli -- events | actions      # inspect the catalog
-npm start                            # HTTP API + web UI + scheduler (127.0.0.1:8787 by default)
+llm-trigger add "when someone opens a PR on c4pt0r/jmp2.io with OOM in the title and it is not a draft, POST to https://x/hook, check hourly"
+llm-trigger list
+llm-trigger run <id> --dry        # evaluate but do not execute actions
+llm-trigger run <id> --all        # ignore dedup history, replay every known event
+llm-trigger fires <id> --limit 20
+llm-trigger events | actions      # inspect the catalog
+llm-trigger serve                 # HTTP API + web UI + scheduler (127.0.0.1:8787 by default)
 npm test
 ```
 

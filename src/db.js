@@ -3,8 +3,18 @@
 // not a JSON scan. node:sqlite is built into Node 22 -> zero dependencies.
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+
+/** LT_DB wins; a dev checkout (package-local data/ exists) keeps ./data;
+ *  a global npm install gets ~/.llm-trigger/ instead of global node_modules. */
+export function defaultDbPath() {
+  if (process.env.LT_DB) return process.env.LT_DB;
+  const local = new URL("../data/llm-trigger.db", import.meta.url).pathname;
+  if (existsSync(dirname(local))) return local;
+  return join(homedir(), ".llm-trigger", "llm-trigger.db");
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS rules (
@@ -97,7 +107,9 @@ export function recompile(db, id, { raw, rule, note, missing, model }) {
   db.prepare(`UPDATE rules SET raw=?, source=?, event=?, target_json=?, when_json=?, every=?, action=?, params_json=?, rendered=?, note=?, missing_json=?, model=?, updated_at=? WHERE id=?`)
     .run(raw, rule.if.source, rule.if.event, JSON.stringify(rule.if.target), JSON.stringify(rule.if.when), rule.if.every,
       rule.then.action, JSON.stringify(rule.then.params), renderOf(rule), note ?? "", JSON.stringify(missing ?? []), model ?? null, Math.floor(Date.now() / 1000), id);
-  db.prepare("UPDATE rules SET state_json = '{\"seen\":[]}' WHERE id = ?").run(id); // new semantics -> forget history
+  // New semantics -> forget history AND re-baseline (last_check_at = NULL), otherwise
+  // the next check would treat every historical event as fresh and fire on all of them.
+  db.prepare("UPDATE rules SET state_json = '{\"seen\":[]}', last_check_at = NULL WHERE id = ?").run(id);
   return getRule(db, id);
 }
 

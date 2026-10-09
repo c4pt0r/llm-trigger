@@ -24,7 +24,7 @@ You must output a single JSON object and nothing else. Shape:
   },
   "then": { "action": "<one of actions>", "params": { ...params of that action... } },
   "missing": ["<dotted path of anything the user did not specify and you had to guess>"],
-  "note": "<one short sentence in the user's language: what this rule will do>"
+  "note": "<one short sentence: what this rule will do. MUST be in the same language as the Sentence (English sentence -> English note)>"
 }
 
 Hard rules:
@@ -37,7 +37,7 @@ Hard rules:
 4. "every" is how often to poll, as 5-field cron in UTC. Use "${DEFAULT_EVERY}" unless the user gave a rhythm ("每小时" -> "0 * * * *"). The user speaks local time ${TZDESC}: convert clock times to UTC (with UTC+8, "每天早上8点" -> "0 0 * * *").
 5. If the user did not say where to send the result, use action "log". If they named a webhook URL, use that URL verbatim in then.params.url.
 6. In text params, interpolate event fields with {{field}}, e.g. "新 release {{tag}}: {{url}}".
-7. If the sentence is not expressible with the catalog, output {"error":"<why, and which event would be needed>"}. Write the error in the user's language.
+7. If the sentence is not expressible with the catalog, output {"error":"<why, and which event would be needed>"}. The error MUST be in the same language as the Sentence (English sentence -> English error), even though this catalog is documented in Chinese.
 
 CATALOG:
 ${JSON.stringify(CATALOG)}`;

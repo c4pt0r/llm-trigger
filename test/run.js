@@ -88,6 +88,18 @@ test("engine: first check baselines history, then fires exactly once per new fac
   assert.equal(fires.length, 3); // 2 baseline + 1 fired; the repeat is dropped before logging
 });
 
+test("recompile forgets history and re-baselines, so an edited rule never replays old events", async () => {
+  const d = db.open(":memory:");
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([rel("v1.0.0"), rel("v0.9.0")]) });
+  const rule = db.insertRule(d, { raw: "x", rule: good });
+  await runRule(d, rule); // baseline
+  const edited = db.recompile(d, rule.id, { raw: "y", rule: good, note: "", missing: [], model: null });
+  assert.equal(edited.last_check_at, null, "edit must reset last_check_at");
+  const s = await runRule(d, edited);
+  assert.equal(s.baseline, true, "first check after edit is a baseline again");
+  assert.equal(s.fired, 0, "historical events must not fire after an edit");
+});
+
 test("engine: conditions gate the action, and dry run never acts", async () => {
   const d = db.open(":memory:");
   globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([rel("v2.0.0-rc1", true), rel("v2.0.0")]) });

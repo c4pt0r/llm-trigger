@@ -5,7 +5,7 @@ import { compileTrigger } from "./parse.js";
 import { runRule } from "./engine.js";
 import { EVENTS, ACTIONS } from "./catalog.js";
 
-const DB = process.env.LT_DB || new URL("../data/llm-trigger.db", import.meta.url).pathname;
+const DB = db.defaultDbPath();
 const [cmd, ...rest] = process.argv.slice(2);
 const BOOL = new Set(["run", "all", "dry", "enabled", "help"]);
 const flags = {};

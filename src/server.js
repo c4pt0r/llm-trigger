@@ -115,7 +115,7 @@ export function createServer(dbPath, { quiet = false } = {}) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || "127.0.0.1";
-  const { server, startScheduler } = createServer(process.env.LT_DB || new URL("../data/llm-trigger.db", import.meta.url).pathname);
+  const { server, startScheduler } = createServer(db.defaultDbPath());
   server.listen(port, host, () => {
     console.log(`llm-trigger on http://${host}:${port}  (model: ${PI_MODEL || "pi default"})`);
     if (process.env.LT_SCHEDULER !== "off") startScheduler();
