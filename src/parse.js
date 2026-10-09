@@ -20,7 +20,8 @@ You must output a single JSON object and nothing else. Shape:
     "event": "<one of events>",
     "target": { ...keys required by that source... },
     "when": [ { "field": "<field of that event>", "op": "<one of ops>", "value": ... } ],
-    "every": "<5-field cron, UTC>"
+    "every": "<5-field cron, UTC>",
+    "mode": "recurring"
   },
   "then": { "action": "<one of actions>", "params": { ...params of that action... } },
   "missing": ["<dotted path of anything the user did not specify and you had to guess>"],
@@ -35,9 +36,10 @@ Hard rules:
 3. Pick the event that best matches the described change; dedup is per event key, so prefer the most specific event.
    If NO specific event fits but the user gave a URL to watch (or explicitly named a local command), use event "observe.changed": target.what = what they want to detect (their words), target.url or target.command = where to look. The fact carries the last snapshot in "previous" and the current one in "content". Add a when condition asking the judge to compare them, e.g. [{"field":"*","op":"agent","value":"comparing previous and content, did <what> happen?"}] (write the question in the same language as the Sentence) — or [{"field":"changed","op":"eq","value":true}] if the user wants ANY change. Only refuse when there is neither a matching event nor a url/command to observe.
 4. "every" is how often to poll, as 5-field cron in UTC. Use "${DEFAULT_EVERY}" unless the user gave a rhythm ("每小时" -> "0 * * * *"). The user speaks local time ${TZDESC}: convert clock times to UTC (with UTC+8, "每天早上8点" -> "0 0 * * *").
-5. If the user did not say where to send the result, use action "log". If they named a webhook URL, use that URL verbatim in then.params.url.
-6. In text params, interpolate event fields with {{field}}, e.g. "新 release {{tag}}: {{url}}".
-7. If the sentence is not expressible with the catalog, output {"error":"<why, and which event would be needed>"}. The error MUST be in the same language as the Sentence (English sentence -> English error), even though this catalog is documented in Chinese.
+5. Triggers are recurring by default. Set "mode":"once" ONLY when the user asks for a one-shot ("just once", "一次就好", "the first time it happens"); such a rule disables itself after it fires.
+6. If the user did not say where to send the result, use action "log". If they named a webhook URL, use that URL verbatim in then.params.url.
+7. In text params, interpolate event fields with {{field}}, e.g. "New release {{tag}}: {{url}}".
+8. If the sentence is not expressible with the catalog, output {"error":"<why, and which event would be needed>"}. The error MUST be in the same language as the Sentence (English sentence -> English error).
 
 CATALOG:
 ${JSON.stringify(CATALOG)}`;

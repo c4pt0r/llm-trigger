@@ -100,6 +100,22 @@ test("recompile forgets history and re-baselines, so an edited rule never replay
   assert.equal(s.fired, 0, "historical events must not fire after an edit");
 });
 
+test("once mode: renders ONCE and the rule disables itself after firing", async () => {
+  const v = validateRule({ ...good, if: { ...good.if, mode: "once" } });
+  assert.ok(v.ok, v.errors.join("; "));
+  assert.ok(v.rendered.endsWith(" ONCE"));
+  assert.equal(validateRule({ ...good, if: { ...good.if, mode: "daily" } }).ok, false);
+  assert.equal(validateRule(good).rule.if.mode, "recurring", "default is recurring");
+
+  const d = db.open(":memory:");
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([rel("v1.0.0")]) });
+  const rule = db.insertRule(d, { raw: "once", rule: v.rule });
+  const s = await runRule(d, rule, { force: true });
+  assert.equal(s.fired, 1);
+  assert.equal(s.disabled, true);
+  assert.equal(db.getRule(d, rule.id).enabled, false, "once rule disables itself after firing");
+});
+
 test("engine: conditions gate the action, and dry run never acts", async () => {
   const d = db.open(":memory:");
   globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([rel("v2.0.0-rc1", true), rel("v2.0.0")]) });

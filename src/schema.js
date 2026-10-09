@@ -58,6 +58,9 @@ export function validateRule(input) {
   if (typeof every !== "string" || every.trim().split(/\s+/).length !== 5)
     errors.push(`if.every must be a 5-field cron expression, got "${every}"`);
 
+  const mode = i.mode ?? "recurring";
+  if (mode !== "recurring" && mode !== "once") errors.push(`if.mode must be "recurring" or "once", got "${mode}"`);
+
   const ac = ACTIONS[t.action];
   if (!ac) errors.push(`then.action must be one of: ${Object.keys(ACTIONS).join(", ")}`);
   else {
@@ -76,6 +79,7 @@ export function validateRule(input) {
       target: target,
       when: when.map((c) => ({ field: c.field, op: c.op, ...(c.value !== undefined ? { value: c.value } : {}) })),
       every,
+      mode,
     },
     then: { action: t.action, params: t.params ?? {} },
   };
@@ -89,7 +93,7 @@ export function renderRule(rule) {
   const head = `${i.event}${tgt ? ` (${tgt})` : ""}`;
   const conds = (i.when ?? []).map(condText).join(" AND ");
   const params = Object.entries(t.params ?? {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
-  return `IF ${head} WHEN ${conds || "true"} EVERY "${i.every}" THEN ${t.action}(${params})`;
+  return `IF ${head} WHEN ${conds || "true"} EVERY "${i.every}" THEN ${t.action}(${params})${i.mode === "once" ? " ONCE" : ""}`;
 }
 
 function condText(c) {

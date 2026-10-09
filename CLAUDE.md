@@ -46,7 +46,7 @@ Fire path (`engine.js` `runRule`): fetch facts → drop keys already in `state_j
 
 `src/db.js` (SQLite at `data/llm-trigger.db`): `rules` stores `raw` + `if_json`/`then_json` + `rendered`, with `source/event/action/every` flattened into real columns for direct SQL queries. `src/cron.js` is a hand-rolled 5-field UTC cron parser with a due-window check (`cronDue`) so a late scheduler tick doesn't miss a minute.
 
-`src/server.js` is a dependency-free `node:http` server serving `public/index.html` and the JSON API (`POST /api/parse`, `POST /api/rules`, `PUT/PATCH /api/rules/:id`, `POST /api/rules/:id/run`, `GET /api/fires`, `GET /api/catalog`); `src/scheduler.js` ticks every `LT_TICK_MS` ms (default 60000) when `LT_SCHEDULER=on`. Per-rule cadence is `if.every` (5-field cron, UTC); the default for sentences with no rhythm is `LT_EVERY` (default `*/10 * * * *`).
+`src/server.js` is a dependency-free `node:http` server serving `public/index.html` and the JSON API (`POST /api/parse`, `POST /api/rules`, `PUT/PATCH /api/rules/:id`, `POST /api/rules/:id/run`, `GET /api/fires`, `GET /api/catalog`); `src/scheduler.js` ticks every `LT_TICK_MS` ms (default 60000) when `LT_SCHEDULER=on` and logs one line per due check. `llm-trigger serve` blocks in the foreground; `-d` daemonizes (pid + log next to the db). Per-rule cadence is `if.every` (5-field cron, UTC); the default for sentences with no rhythm is `LT_EVERY` (default `*/10 * * * *`). `if.mode: "once"` (default `"recurring"`, stored in the `mode` column) makes a rule disable itself after its first fire.
 
 ## Constraints
 

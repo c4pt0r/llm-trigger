@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS rules (
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   last_check_at INTEGER,
-  state_json   TEXT NOT NULL DEFAULT '{"seen":[]}'
+  state_json   TEXT NOT NULL DEFAULT '{"seen":[]}',
+  mode         TEXT NOT NULL DEFAULT 'recurring'  -- once = disable after first fire
 );
 CREATE INDEX IF NOT EXISTS rules_enabled ON rules(enabled);
 CREATE INDEX IF NOT EXISTS rules_event ON rules(event);
@@ -61,6 +62,7 @@ export function open(dbPath) {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  try { db.exec("ALTER TABLE rules ADD COLUMN mode TEXT NOT NULL DEFAULT 'recurring'"); } catch { /* column exists */ }
   return db;
 }
 
@@ -68,7 +70,7 @@ const rowToRule = (r) => ({
   id: r.id, raw: r.raw, enabled: !!r.enabled, rendered: r.rendered, note: r.note,
   model: r.model, created_at: r.created_at, updated_at: r.updated_at, last_check_at: r.last_check_at,
   missing: JSON.parse(r.missing_json),
-  if: { source: r.source, event: r.event, target: JSON.parse(r.target_json), when: JSON.parse(r.when_json), every: r.every },
+  if: { source: r.source, event: r.event, target: JSON.parse(r.target_json), when: JSON.parse(r.when_json), every: r.every, mode: r.mode ?? "recurring" },
   then: { action: r.action, params: JSON.parse(r.params_json) },
 });
 
@@ -76,10 +78,10 @@ export function insertRule(db, { raw, rule, note = "", missing = [], model = nul
   const now = Math.floor(Date.now() / 1000);
   const id = "r_" + randomUUID().slice(0, 8);
   db.prepare(`INSERT INTO rules
-      (id, raw, source, event, target_json, when_json, every, action, params_json, rendered, note, missing_json, model, enabled, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, raw, source, event, target_json, when_json, every, mode, action, params_json, rendered, note, missing_json, model, enabled, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id, raw, rule.if.source, rule.if.event, JSON.stringify(rule.if.target), JSON.stringify(rule.if.when),
-      rule.if.every, rule.then.action, JSON.stringify(rule.then.params), renderOf(rule), note, JSON.stringify(missing), model, 1, now, now);
+      rule.if.every, rule.if.mode ?? "recurring", rule.then.action, JSON.stringify(rule.then.params), renderOf(rule), note, JSON.stringify(missing), model, 1, now, now);
   return getRule(db, id);
 }
 
@@ -89,7 +91,7 @@ function renderOf(rule) {
   const tgt = Object.entries(i.target ?? {}).map(([k, v]) => `${k}=${v}`).join(" ");
   const conds = (i.when ?? []).map((c) => (c.op === "exists" ? `${c.field} exists` : `${c.field} ${c.op} ${JSON.stringify(c.value)}`)).join(" AND ");
   const params = Object.entries(t.params ?? {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
-  return `IF ${i.event}${tgt ? ` (${tgt})` : ""} WHEN ${conds || "true"} EVERY "${i.every}" THEN ${t.action}(${params})`;
+  return `IF ${i.event}${tgt ? ` (${tgt})` : ""} WHEN ${conds || "true"} EVERY "${i.every}" THEN ${t.action}(${params})${i.mode === "once" ? " ONCE" : ""}`;
 }
 
 export const listRules = (db, { all = true } = {}) =>
@@ -104,8 +106,8 @@ export function setEnabled(db, id, enabled) {
 export const deleteRule = (db, id) => { db.prepare("DELETE FROM fires WHERE rule_id = ?").run(id); return db.prepare("DELETE FROM rules WHERE id = ?").run(id).changes > 0; };
 
 export function recompile(db, id, { raw, rule, note, missing, model }) {
-  db.prepare(`UPDATE rules SET raw=?, source=?, event=?, target_json=?, when_json=?, every=?, action=?, params_json=?, rendered=?, note=?, missing_json=?, model=?, updated_at=? WHERE id=?`)
-    .run(raw, rule.if.source, rule.if.event, JSON.stringify(rule.if.target), JSON.stringify(rule.if.when), rule.if.every,
+  db.prepare(`UPDATE rules SET raw=?, source=?, event=?, target_json=?, when_json=?, every=?, mode=?, action=?, params_json=?, rendered=?, note=?, missing_json=?, model=?, updated_at=? WHERE id=?`)
+    .run(raw, rule.if.source, rule.if.event, JSON.stringify(rule.if.target), JSON.stringify(rule.if.when), rule.if.every, rule.if.mode ?? "recurring",
       rule.then.action, JSON.stringify(rule.then.params), renderOf(rule), note ?? "", JSON.stringify(missing ?? []), model ?? null, Math.floor(Date.now() / 1000), id);
   // New semantics -> forget history AND re-baseline (last_check_at = NULL), otherwise
   // the next check would treat every historical event as fresh and fire on all of them.

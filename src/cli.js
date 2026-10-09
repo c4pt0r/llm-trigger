@@ -12,6 +12,7 @@ const flags = {};
 const args = [];
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
+  if (a === "-d") { flags.d = true; continue; }
   if (!a.startsWith("--")) { args.push(a); continue; }
   const k = a.slice(2);
   if (k.includes("=")) flags[k] = a.slice(k.indexOf("=") + 1);
@@ -90,14 +91,31 @@ async function main() {
     case "stats": console.log(JSON.stringify(db.stats(d), null, 2)); break;
     case "events": console.log(Object.entries(EVENTS).map(([k, v]) => `${k}  ${v.summary}  fields: ${Object.keys(v.fields).join(",")}`).join("\n")); break;
     case "actions": console.log(Object.entries(ACTIONS).map(([k, v]) => `${k}  ${v.note}  params: ${Object.keys(v.params).join(",")}`).join("\n")); break;
-    case "serve": process.env.PORT = flags.port || process.env.PORT; await import("./server.js"); break;
+    case "serve": {
+      if (flags.port) process.env.PORT = flags.port;
+      if (!flags.d) { await import("./server.js"); break; } // foreground: blocks, polling logs go to stdout
+      const { spawn } = await import("node:child_process");
+      const { openSync, writeFileSync, mkdirSync } = await import("node:fs");
+      const { dirname, join } = await import("node:path");
+      const dir = dirname(DB);
+      mkdirSync(dir, { recursive: true });
+      const logPath = join(dir, "llm-trigger.log");
+      const fd = openSync(logPath, "a");
+      const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", new URL("./server.js", import.meta.url).pathname],
+        { detached: true, stdio: ["ignore", fd, fd], env: process.env });
+      child.unref();
+      writeFileSync(join(dir, "llm-trigger.pid"), String(child.pid));
+      console.log(`daemonized: pid ${child.pid} (kill $(cat ${join(dir, "llm-trigger.pid")}) to stop)`);
+      console.log(`logs: ${logPath}`);
+      break;
+    }
     default: usage();
   }
 }
 
 function report(idOrS, maybeS) {
   const s = maybeS ?? idOrS, id = maybeS ? idOrS : "";
-  console.log(`${id ? id + " " : ""}checked=${s.checked} fresh=${s.fresh} matched=${s.matched} fired=${s.fired} errors=${s.errors} skipped=${s.skipped}${s.baseline ? " (baseline: first check only records history, nothing fires)" : ""}`);
+  console.log(`${id ? id + " " : ""}checked=${s.checked} fresh=${s.fresh} matched=${s.matched} fired=${s.fired} errors=${s.errors} skipped=${s.skipped}${s.baseline ? " (baseline: first check only records history, nothing fires)" : ""}${s.disabled ? " (once: rule disabled)" : ""}`);
   for (const r of s.results ?? []) console.log(`  ${pad(r.status, 9)} ${pad(r.key, 18)} ${r.detail ?? ""}`);
 }
 
@@ -122,7 +140,8 @@ function usage() {
   llm-trigger list | show <id> | on|off <id> | rm <id>
   llm-trigger run <id> [--dry] [--all]           check once now (--all = ignore dedup history, replay all events)
   llm-trigger run-all [--dry] | fires [id] [--limit N] | stats | events | actions
-  llm-trigger serve [--port 8787]                HTTP API + web UI + scheduler
+  llm-trigger serve [--port 8787] [-d]           HTTP API + web UI + scheduler; blocks and logs
+                                                 each poll unless -d (daemonize, log to file)
 `);
 }
 

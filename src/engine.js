@@ -5,7 +5,7 @@ import { fetchFacts } from "./sources.js";
 import { evalRule, judgedConditions, factKey } from "./schema.js";
 import { judgeConditions } from "./judge.js";
 import { runAction } from "./actions.js";
-import { getSeen, markSeen, logFire, touchCheck, getSnapshot, saveSnapshot } from "./db.js";
+import { getSeen, markSeen, logFire, touchCheck, getSnapshot, saveSnapshot, setEnabled } from "./db.js";
 
 export async function runRule(db, rule, { dryRun = false, force = false, judge = judgeConditions } = {}) {
   const isObserve = rule.if.source === "observe";
@@ -73,5 +73,7 @@ export async function runRule(db, rule, { dryRun = false, force = false, judge =
     summary.results.push({ key, matched, status, detail, fact: f });
   }
   if (!dryRun) { markSeen(db, rule.id, keys); keepSnapshot(); touchCheck(db, rule.id); }
+  // mode "once": the rule fired, its job is done — disable it (re-enable with `on <id>`)
+  if (!dryRun && summary.fired > 0 && rule.if.mode === "once") { setEnabled(db, rule.id, false); summary.disabled = true; }
   return summary;
 }
