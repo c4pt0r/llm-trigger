@@ -5,7 +5,7 @@ import { validateRule, evalRule, evalCondition, renderRule, factKey } from "../s
 import { parseCron, cronMatch, cronDue } from "../src/cron.js";
 import * as db from "../src/db.js";
 import { runRule } from "../src/engine.js";
-import { piArgs } from "../src/pi.js";
+import { buildArgs, parseAgentOutput, PRESETS } from "../src/agent.js";
 
 const good = {
   if: { source: "github", event: "github.release.published", target: { repo: "c4pt0r/jmp2.io" }, when: [{ field: "prerelease", op: "eq", value: false }], every: "*/10 * * * *" },
@@ -211,14 +211,25 @@ test("observe: snapshot diff feeds the judge previous+content, unchanged costs n
   assert.equal(s4.results[0].status, "no_match");
 });
 
-test("pi backend runs tool-less and pins the current model", () => {
-  const a = piArgs({ system: "s", user: "u", model: "strata/qwen3.8-flash-next-iq3_s" });
+test("agent backend: pi preset runs tool-less and pins the model; custom configs substitute and drop empty flags", () => {
+  const a = buildArgs(PRESETS.pi, { system: "s", user: "u", model: "strata/qwen3.8-flash-next-iq3_s" });
   assert.ok(a.includes("-nt") && a.includes("-ns") && a.includes("-nc"));
   assert.ok(a.includes("--no-session"));
   // "provider/id" is split into pi's canonical --provider X --model Y form
   assert.equal(a[a.indexOf("--provider") + 1], "strata");
   assert.equal(a[a.indexOf("--model") + 1], "qwen3.8-flash-next-iq3_s");
   assert.equal(a.at(-2), "--");
+
+  // custom agent config: placeholders substituted, empty {model} drops its flag too
+  const custom = { name: "x", cmd: "x", args: ["--system", "{system}", "--model", "{model}", "{user}"], output: "text", model: "" };
+  assert.deepEqual(buildArgs(custom, { system: "SYS", user: "hello" }), ["--system", "SYS", "hello"]);
+  assert.deepEqual(buildArgs(custom, { system: "SYS", user: "hello", model: "m1" }), ["--system", "SYS", "--model", "m1", "hello"]);
+
+  // output parsing: text mode is the raw reply; pi-jsonl digs out the assistant message
+  assert.equal(parseAgentOutput("text", ' {"a":1} \n', 0).text, '{"a":1}');
+  assert.throws(() => parseAgentOutput("text", "", 0), /empty/);
+  const jsonl = JSON.stringify({ type: "message_end", message: { role: "assistant", stopReason: "stop", model: "m", content: [{ type: "text", text: "ok" }] } });
+  assert.equal(parseAgentOutput("pi-jsonl", `noise\n${jsonl}\n`, 0).text, "ok");
 });
 
 test("server: API routes match when the URL has a query string", async () => {

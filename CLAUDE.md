@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Natural language → structured `IF/THEN` trigger rules. An LLM (a local model via the `pi` CLI) runs **only at compile time** to translate a sentence into a `{if, then}` JSON rule; the runtime (cron scheduler → poll sources → evaluate conditions → run actions) is plain deterministic code with zero model calls — except rules that opt into the slow-judge ops handled by `src/judge.js`: `script` (local command, fact JSON on stdin, exit 0 = pass, gated by `ALLOW_SHELL=1`) and `agent` (one local-model yes/no call). Judges run only on fresh facts that passed the deterministic conditions; scripts run before the model and short-circuit. Zero npm dependencies — requires Node >= 22.5 (uses built-in `node:sqlite`).
+Natural language → structured `IF/THEN` trigger rules. An agent (any prompt-in/reply-out CLI — pi with a local model by default, see `src/agent.js`) runs **only at compile time** to translate a sentence into a `{if, then}` JSON rule; the runtime (cron scheduler → poll sources → evaluate conditions → run actions) is plain deterministic code with zero model calls — except rules that opt into the slow-judge ops handled by `src/judge.js`: `script` (local command, fact JSON on stdin, exit 0 = pass, gated by `ALLOW_SHELL=1`) and `agent` (one local-model yes/no call). Judges run only on fresh facts that passed the deterministic conditions; scripts run before the model and short-circuit. Zero npm dependencies — requires Node >= 22.5 (uses built-in `node:sqlite`).
 
 ## Commands
 
@@ -42,7 +42,7 @@ Fire path (`engine.js` `runRule`): fetch facts → drop keys already in `state_j
 2. **Dedup is once per event, matched or not** — failed actions log `error` but are never auto-retried.
 3. **Slow judges run last and at most once per fact** — only after deterministic conditions pass; a judge failure logs `error` and does not fire.
 
-`src/pi.js` spawns a one-shot tool-less pi process (`pi -p --mode json --no-session -nt -ns -np -nc`) and parses its JSONL stream. It always pins a model via `--provider X --model Y` (pi's default provider fails on this machine): `LT_MODEL=provider/id` if set, else `$PI_PROVIDER/$PI_MODEL` (only present inside a pi session), else the hardcoded fallback `strata/qwen3.8-flash-next-iq3_s`.
+`src/agent.js` is the agent abstraction used by both the compiler and the judges: `LT_AGENT` picks a preset (`pi` default, `claude`) or a JSON config path (`{cmd, args, output, timeoutMs}` with `{system}`/`{user}`/`{model}`-style placeholders; an arg whose placeholder resolves empty is dropped together with its preceding flag). Output modes: `"pi-jsonl"` (pi's `--mode json` stream) or `"text"` (stdout is the reply). The pi preset runs tool-less (`-nt -ns -np -nc --no-session`) and always pins a model: `LT_MODEL=provider/id` if set, else `$PI_PROVIDER/$PI_MODEL` (only present inside a pi session), else the hardcoded fallback `strata/qwen3.8-flash-next-iq3_s` (pi's default provider fails on this machine).
 
 `src/db.js` (SQLite at `data/llm-trigger.db`): `rules` stores `raw` + `if_json`/`then_json` + `rendered`, with `source/event/action/every` flattened into real columns for direct SQL queries. `src/cron.js` is a hand-rolled 5-field UTC cron parser with a due-window check (`cronDue`) so a late scheduler tick doesn't miss a minute.
 

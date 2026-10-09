@@ -5,7 +5,7 @@
 // Scripts run first (cheap, local) and short-circuit; the model is asked last.
 // Dedup guarantees at most one judgement per fact per rule.
 import { spawn } from "node:child_process";
-import { piJson } from "./pi.js";
+import { agentJson } from "./agent.js";
 
 const SYSTEM = `You are a strict yes/no judge inside a trigger system. You get one event (JSON) and numbered questions about it.
 Answer ONLY with {"answers":[{"n":1,"yes":true|false,"why":"<short reason, user's language>"}, ...]} — one entry per question, same order.
@@ -13,9 +13,9 @@ Judge only from the event content. When unsure, answer no.`;
 
 /** Model judge: all agent conditions of one fact in a single pi call. */
 export async function judgeFact(conds, fact, { model } = {}) {
-  const questions = conds.map((c, i) => `${i + 1}. ${c.field === "*" ? "" : `[关于字段 ${c.field}] `}${c.value}`);
+  const questions = conds.map((c, i) => `${i + 1}. ${c.field === "*" ? "" : `[about field ${c.field}] `}${c.value}`);
   const user = `Event:\n${JSON.stringify(fact)}\n\nQuestions:\n${questions.join("\n")}`;
-  const { value } = await piJson({ system: SYSTEM, user, model });
+  const { value } = await agentJson({ system: SYSTEM, user, model });
   const answers = Array.isArray(value?.answers) ? value.answers : [];
   if (answers.length !== conds.length) throw new Error(`judge returned ${answers.length} answers for ${conds.length} questions`);
   const yes = answers.every((a) => a?.yes === true);

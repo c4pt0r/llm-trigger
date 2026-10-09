@@ -10,7 +10,7 @@ import { validateRule } from "./schema.js";
 import { runRule } from "./engine.js";
 import { startScheduler } from "./scheduler.js";
 import { catalogAsJson } from "./catalog.js";
-import { PI_MODEL } from "./pi.js";
+import { AGENT } from "./agent.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PUB = join(HERE, "..", "public");
@@ -28,7 +28,7 @@ export function createServer(dbPath, { quiet = false } = {}) {
   const log = (m) => { if (!quiet) console.log(m); };
 
   const routes = [
-    ["GET", /^\/api\/health$/, async () => ({ ok: true, model: PI_MODEL || "pi default", shell: process.env.ALLOW_SHELL === "1", ...db.stats(database) })],
+    ["GET", /^\/api\/health$/, async () => ({ ok: true, agent: AGENT.name, model: AGENT.model || "(agent default)", shell: process.env.ALLOW_SHELL === "1", ...db.stats(database) })],
     ["GET", /^\/api\/catalog$/, async () => catalogAsJson()],
 
     ["POST", /^\/api\/parse$/, async (m, body) => {
@@ -117,7 +117,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const host = process.env.HOST || "127.0.0.1";
   const { server, startScheduler } = createServer(db.defaultDbPath());
   server.listen(port, host, () => {
-    console.log(`llm-trigger on http://${host}:${port}  (model: ${PI_MODEL || "pi default"})`);
+    console.log(`llm-trigger on http://${host}:${port}  (agent: ${AGENT.name}, model: ${AGENT.model || "agent default"})`);
     if (process.env.LT_SCHEDULER !== "off") startScheduler();
   });
 }

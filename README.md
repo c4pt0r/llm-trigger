@@ -38,9 +38,20 @@ rejected:
 
 When validation fails, the errors are fed back to the model for one repair round (`maxRounds`). If it is still invalid, the API returns 422 — a half-valid rule is never stored.
 
-## LLM backend = pi (no OpenAI key)
+## Agent backend (pi is just one example)
 
-`src/pi.js` spawns a one-shot, tool-less pi process and reads its JSONL event stream:
+The compiler and the runtime judges talk to "an agent": any CLI that takes a system prompt + a user prompt and prints a reply. `src/agent.js` holds the abstraction; pick a backend with `LT_AGENT`:
+
+```bash
+llm-trigger parse "..."                        # default: the pi preset (local model, no API key)
+LT_AGENT=claude llm-trigger parse "..."        # claude preset (claude -p)
+LT_AGENT=./my-agent.json llm-trigger parse ... # any CLI, via a JSON config:
+# { "cmd": "my-agent", "args": ["--system", "{system}", "{user}"], "output": "text" }
+```
+
+Placeholders in `args`: `{system}` `{user}` `{thinking}` `{model}` `{provider}` `{modelId}`. An arg whose placeholder resolves to nothing is dropped together with the flag before it, so `["--model", "{model}"]` vanishes when no model is set. `output` is `"text"` (stdout is the reply) or `"pi-jsonl"` (pi's `--mode json` event stream).
+
+The pi preset spawns a one-shot, tool-less process:
 
 ```
 pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
@@ -48,7 +59,7 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 ```
 
 - `-nt -ns -np -nc` disables tools / skills / prompt templates / AGENTS.md. One compile costs ~60 input tokens and ~1s.
-- Model resolution: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else the built-in fallback `strata/qwen3.8-flash-next-iq3_s` — pi's configured default provider fails on this machine with `Connection error.`, so `pi.js` always pins one explicitly.
+- Model resolution for pi: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else the built-in fallback `strata/qwen3.8-flash-next-iq3_s` — pi's configured default provider may fail with `Connection error.`, so a model is always pinned explicitly.
 - Cron is UTC, but the compiler prompt carries the machine's timezone, so "every morning at 9" (or "每天早上9点" — input can be Chinese or English) is converted to the right UTC cron line.
 
 ## Storage (SQLite via Node 22's built-in `node:sqlite`, zero dependencies)

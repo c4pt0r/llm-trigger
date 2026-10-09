@@ -52,7 +52,7 @@ async function main() {
     }
     case "list": {
       const rows = db.listRules(d);
-      if (!rows.length) return console.log("(no rules yet — try: npm run cli -- add \"当 ... 就 ...\")");
+      if (!rows.length) return console.log('(no rules yet — try: llm-trigger add "when ..., do ...")');
       for (const r of rows) {
         console.log(`${r.id}  ${r.enabled ? "on " : "off"}  ${r.rendered}`);
         console.log(`      “${r.raw}”  last_check=${ts(r.last_check_at)}${r.missing?.length ? `  missing=${r.missing.join(",")}` : ""}`);
@@ -97,7 +97,7 @@ async function main() {
 
 function report(idOrS, maybeS) {
   const s = maybeS ?? idOrS, id = maybeS ? idOrS : "";
-  console.log(`${id ? id + " " : ""}checked=${s.checked} fresh=${s.fresh} matched=${s.matched} fired=${s.fired} errors=${s.errors} skipped=${s.skipped}${s.baseline ? " (baseline: 首次检查只记录历史，不触发)" : ""}`);
+  console.log(`${id ? id + " " : ""}checked=${s.checked} fresh=${s.fresh} matched=${s.matched} fired=${s.fired} errors=${s.errors} skipped=${s.skipped}${s.baseline ? " (baseline: first check only records history, nothing fires)" : ""}`);
   for (const r of s.results ?? []) console.log(`  ${pad(r.status, 9)} ${pad(r.key, 18)} ${r.detail ?? ""}`);
 }
 
@@ -114,15 +114,15 @@ function printCompiled(r, id, raw) {
 const fail = (errors) => { console.error("rejected:\n- " + errors.join("\n- ")); process.exitCode = 1; };
 
 function usage() {
-  console.log(`llm-trigger — 自然语言 -> IF/THEN 规则（编译器是 pi 上的本地模型）
+  console.log(`llm-trigger — natural language -> IF/THEN rules (compiled by a local model via pi)
 
-  cli add "<自然语言>" [--run [--all]]   编译并存为规则
-  cli parse "<自然语言>"                 只编译，不存
-  cli edit <id> "<自然语言>"             重新编译覆盖
-  cli list | show <id> | on|off <id> | rm <id>
-  cli run <id> [--dry] [--all]           立即检查一次（--all = 忽略去重历史，重放全部事件）
-  cli run-all [--dry] | fires [id] [--limit N] | stats | events | actions
-  cli serve [--port 8787]                HTTP API + 网页 + 调度器
+  llm-trigger add "<sentence>" [--run [--all]]   compile and store as a rule
+  llm-trigger parse "<sentence>"                 compile only, do not store
+  llm-trigger edit <id> "<sentence>"             recompile and overwrite
+  llm-trigger list | show <id> | on|off <id> | rm <id>
+  llm-trigger run <id> [--dry] [--all]           check once now (--all = ignore dedup history, replay all events)
+  llm-trigger run-all [--dry] | fires [id] [--limit N] | stats | events | actions
+  llm-trigger serve [--port 8787]                HTTP API + web UI + scheduler
 `);
 }
 
