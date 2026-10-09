@@ -60,7 +60,7 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 ```
 
 - `-nt -ns -np -nc` disables tools / skills / prompt templates / AGENTS.md. One compile costs ~60 input tokens and ~1s.
-- Model resolution for pi: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else the built-in fallback `strata/qwen3.8-flash-next-iq3_s` — pi's configured default provider may fail with `Connection error.`, so a model is always pinned explicitly.
+- Model resolution for pi: `LT_MODEL=provider/id` if set, else the **current pi session model** (`PI_PROVIDER/PI_MODEL`), else no model flags are passed at all and **pi's own configured default** applies — configure your local pi however you like.
 - Cron is UTC, but the compiler prompt carries the machine's timezone, so "every morning at 9" (or "每天早上9点" — input can be Chinese or English) is converted to the right UTC cron line.
 
 ## Storage (SQLite via Node 22's built-in `node:sqlite`, zero dependencies)
@@ -125,7 +125,7 @@ npm test
 `serve` blocks in the foreground and logs every poll; `-d` daemonizes instead (pid and log land next to the db, `kill $(cat .../llm-trigger.pid)` to stop):
 
 ```
-llm-trigger on http://127.0.0.1:8787  (agent: pi, model: strata/qwen3.8-flash-next-iq3_s)
+llm-trigger on http://127.0.0.1:8787  (agent: pi, model: agent default)
 2026-10-09T18:16:42Z scheduler: tick every 60000ms, 2 enabled rule(s)
 2026-10-09T18:16:43Z r_5ecded6f github.release.published baseline: 10 existing event(s) recorded, nothing fires
 2026-10-09T18:26:43Z r_5ecded6f github.release.published checked=10 fresh=1 matched=1 fired=1
@@ -143,7 +143,7 @@ All optional (see `.env.example`):
 | env | default | meaning |
 |---|---|---|
 | `LT_AGENT` | `pi` | agent preset (`pi`, `claude`) or path to a JSON agent config |
-| `LT_MODEL` | `$PI_PROVIDER/$PI_MODEL`, then `strata/qwen3.8-flash-next-iq3_s` | model handed to the agent (`provider/id` for pi) |
+| `LT_MODEL` | `$PI_PROVIDER/$PI_MODEL`, else the agent's own default | model handed to the agent (`provider/id` for pi) |
 | `LT_DB` | `~/.llm-trigger/llm-trigger.db`, or `./data/` in a checkout | SQLite path |
 | `LT_SCHEDULER` | `on` | `off` = serve API/UI only, no polling |
 | `LT_TICK_MS` | `60000` | scheduler tick; cron granularity is 1 minute, so smaller buys nothing |

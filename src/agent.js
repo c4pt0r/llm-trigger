@@ -14,8 +14,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-export const DEFAULT_MODEL = "strata/qwen3.8-flash-next-iq3_s";
-
 export const PRESETS = {
   pi: {
     name: "pi",
@@ -25,9 +23,10 @@ export const PRESETS = {
       "--thinking", "{thinking}", "--system-prompt", "{system}",
       "--provider", "{provider}", "--model", "{modelId}", "--", "{user}"],
     output: "pi-jsonl",
-    // Outside a pi session PI_PROVIDER/PI_MODEL are unset and pi's default
-    // provider errors out on this machine, so pin the known-good local model.
-    model: process.env.LT_MODEL || `${process.env.PI_PROVIDER || ""}/${process.env.PI_MODEL || ""}`.replace(/^\//, "") || DEFAULT_MODEL,
+    // LT_MODEL wins, else the current pi session's model (PI_PROVIDER/PI_MODEL,
+    // only set inside a pi session), else nothing: the --provider/--model args
+    // drop out and pi uses whatever default the local pi config has.
+    model: process.env.LT_MODEL || `${process.env.PI_PROVIDER || ""}/${process.env.PI_MODEL || ""}`.replace(/^\//, "") || "",
   },
   claude: {
     name: "claude",

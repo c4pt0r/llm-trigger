@@ -236,6 +236,11 @@ test("agent backend: pi preset runs tool-less and pins the model; custom configs
   assert.equal(a[a.indexOf("--model") + 1], "qwen3.8-flash-next-iq3_s");
   assert.equal(a.at(-2), "--");
 
+  // no model configured -> --provider/--model drop out, pi's own default applies
+  const bare = buildArgs({ ...PRESETS.pi, model: "" }, { system: "s", user: "u" });
+  assert.ok(!bare.includes("--provider") && !bare.includes("--model"));
+  assert.ok(bare.includes("--system-prompt"));
+
   // custom agent config: placeholders substituted, empty {model} drops its flag too
   const custom = { name: "x", cmd: "x", args: ["--system", "{system}", "--model", "{model}", "{user}"], output: "text", model: "" };
   assert.deepEqual(buildArgs(custom, { system: "SYS", user: "hello" }), ["--system", "SYS", "hello"]);
