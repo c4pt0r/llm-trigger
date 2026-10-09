@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Natural language → structured `IF/THEN` trigger rules. An agent (any prompt-in/reply-out CLI — pi with a local model by default, see `src/agent.js`) runs **only at compile time** to translate a sentence into a `{if, then}` JSON rule; the runtime (cron scheduler → poll sources → evaluate conditions → run actions) is plain deterministic code with zero model calls — except rules that opt into the slow-judge ops handled by `src/judge.js`: `script` (local command, fact JSON on stdin, exit 0 = pass, gated by `ALLOW_SHELL=1`) and `agent` (one local-model yes/no call). Judges run only on fresh facts that passed the deterministic conditions; scripts run before the model and short-circuit. Zero npm dependencies — requires Node >= 22.5 (uses built-in `node:sqlite`).
+Natural language → structured `IF/THEN` trigger rules. An agent (any prompt-in/reply-out CLI — pi with a local model by default, see `src/agent.js`) runs **only at compile time** to translate a sentence into a `{if, then}` JSON rule; the runtime (cron scheduler → poll sources → evaluate conditions → run actions) is plain deterministic code with zero model calls — except rules that opt into the slow-judge ops handled by `src/judge.js`: `script` (local command, fact JSON on stdin, exit 0 = pass) and `agent` (one local-model yes/no call). Judges run only on fresh facts that passed the deterministic conditions; scripts run before the model and short-circuit. Zero npm dependencies — requires Node >= 22.5 (uses built-in `node:sqlite`).
 
 ## Commands
 
@@ -32,7 +32,7 @@ The central invariant: **`src/catalog.js` is the single contract** between the L
 
 **Adding an event** = one entry in `catalog.js` + one branch in `sources.js`; prompt and validator pick it up automatically.
 
-`observe.changed` (source `observe`) is the open-world event: target is `{what, url|command}`; `sources.js` snapshots the url (HTML stripped) or command output (`ALLOW_SHELL=1` gated), the engine passes the previous snapshot from rule state (`db.getSnapshot`/`saveSnapshot`, kept beside `seen` in `state_json`) into `fetchFacts`, and the fact carries `previous`/`content`/`changed`/`digest`. Dedup key = content digest, so unchanged snapshots never reach the judges. The compiler uses it as fallback when no specific event fits but the user named a URL or command.
+`observe.changed` (source `observe`) is the open-world event: target is `{what, url|command}`; `sources.js` snapshots the url (HTML stripped) or command output, the engine passes the previous snapshot from rule state (`db.getSnapshot`/`saveSnapshot`, kept beside `seen` in `state_json`) into `fetchFacts`, and the fact carries `previous`/`content`/`changed`/`digest`. Dedup key = content digest, so unchanged snapshots never reach the judges. The compiler uses it as fallback when no specific event fits but the user named a URL or command.
 
 Compile path (`parse.js`): pi returns JSON → `validateRule()` → on failure, errors are fed back to the model for one repair round (`maxRounds: 2`) → still invalid = rejected (422 from API); half-valid rules are never stored. The model may also refuse with `{"error": ...}` if the sentence isn't expressible with the catalog.
 
@@ -50,7 +50,7 @@ Fire path (`engine.js` `runRule`): fetch facts → drop keys already in `state_j
 
 ## Constraints
 
-- `shell.exec` only runs with `ALLOW_SHELL=1`; otherwise logged as `skipped`. No API auth — server binds `127.0.0.1` and must not be exposed publicly.
+- Shell-powered capabilities (`shell.exec`, `agent.run`, `script` conditions, `observe` commands) are **on by default**; `ALLOW_SHELL=0` disables them all (`shellAllowed()` in catalog.js). No API auth — server binds `127.0.0.1` and must not be exposed publicly.
 - Unauthenticated GitHub polling is limited to 60 req/h; set `GITHUB_TOKEN` to raise it.
 - Single-process scheduler, no distributed lock — running two instances fires twice.
 - Rules are one event + a conjunction of conditions; no cross-event composition.

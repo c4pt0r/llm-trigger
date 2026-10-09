@@ -9,7 +9,7 @@ import { compileTrigger } from "./parse.js";
 import { validateRule } from "./schema.js";
 import { runRule } from "./engine.js";
 import { startScheduler } from "./scheduler.js";
-import { catalogAsJson } from "./catalog.js";
+import { catalogAsJson, shellAllowed } from "./catalog.js";
 import { AGENT } from "./agent.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -28,7 +28,7 @@ export function createServer(dbPath, { quiet = false } = {}) {
   const log = (m) => { if (!quiet) console.log(m); };
 
   const routes = [
-    ["GET", /^\/api\/health$/, async () => ({ ok: true, agent: AGENT.name, model: AGENT.model || "(agent default)", shell: process.env.ALLOW_SHELL === "1", ...db.stats(database) })],
+    ["GET", /^\/api\/health$/, async () => ({ ok: true, agent: AGENT.name, model: AGENT.model || "(agent default)", shell: shellAllowed(), ...db.stats(database) })],
     ["GET", /^\/api\/catalog$/, async () => catalogAsJson()],
 
     ["POST", /^\/api\/parse$/, async (m, body) => {

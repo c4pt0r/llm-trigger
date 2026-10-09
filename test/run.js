@@ -169,7 +169,7 @@ test("script op: gated by ALLOW_SHELL, fact arrives on stdin, exit code decides"
   assert.equal(validateRule({ ...good, if: { ...good.if, when: [{ field: "*", op: "script", value: "" }] } }).ok, false);
 
   const prev = process.env.ALLOW_SHELL;
-  delete process.env.ALLOW_SHELL;
+  process.env.ALLOW_SHELL = "0"; // shell is on by default; "0" is the explicit opt-out
   await assert.rejects(() => judgeConditions(conds, { prerelease: false }), /ALLOW_SHELL/);
 
   process.env.ALLOW_SHELL = "1";
@@ -234,10 +234,10 @@ test("agent.run action: validated, gated by ALLOW_SHELL, exec args keep tools en
   assert.equal(validateRule({ ...good, then: { action: "agent.run", params: {} } }).ok, false, "task is required");
 
   const prev = process.env.ALLOW_SHELL;
-  delete process.env.ALLOW_SHELL;
+  process.env.ALLOW_SHELL = "0"; // shell is on by default; "0" is the explicit opt-out
   const out = await runAction(validateRule(withAgentRun).rule, { tag: "v1" });
-  assert.equal(out.status, "skipped", "no ALLOW_SHELL -> skipped, agent never spawned");
-  if (prev !== undefined) process.env.ALLOW_SHELL = prev;
+  assert.equal(out.status, "skipped", "ALLOW_SHELL=0 -> skipped, agent never spawned");
+  if (prev !== undefined) process.env.ALLOW_SHELL = prev; else delete process.env.ALLOW_SHELL;
 
   // executor invocation keeps tools: no -nt/-ns in pi exec args
   const exec = buildArgs({ ...PRESETS.pi, args: PRESETS.pi.execArgs }, { system: "s", user: "u" });

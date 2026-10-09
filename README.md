@@ -23,7 +23,7 @@ Natural language in, structured rule out. Input can be Chinese or English; the s
 
 Conditions come in three tiers. Deterministic ops (`eq`/`contains`/...) are pure code. On top of them a rule may opt into **slow judges**, which run only on **fresh** facts that already passed the deterministic filters, at most once per event (dedup), never during baseline:
 
-- `script` — a local command; the event JSON arrives on stdin, exit code 0 = pass (`LT_EVENT`/`LT_FIELD` in env). Gated by `ALLOW_SHELL=1`, like the `shell.exec` action.
+- `script` — a local command; the event JSON arrives on stdin, exit code 0 = pass (`LT_EVENT`/`LT_FIELD` in env).
 - `agent` — the local model answers a yes/no question about the event ("does this look like a security fix?"); the verdict and its reason are logged in `fires`.
 
 Scripts run before the model and short-circuit, so an `agent` condition behind a failing `script` costs nothing.
@@ -86,12 +86,12 @@ pi -p --mode json --no-session -nt -ns -np -nc --thinking off \
 | `time.schedule` | time | now | now,date,time,weekday |
 | `observe.changed` | observe | digest | what,content,previous,changed,digest,url |
 
-Condition ops: `eq ne contains not_contains matches gt gte lt lte in exists` + slow judges `script` (local command, exit 0 = pass, needs `ALLOW_SHELL=1`) and `agent` (yes/no judged by the local model); for both, `field` may be `*` for the whole event
-Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec`, `agent.run` (hand the fired event to the local agent **with tools** and let it carry out a task — send an email, file a ticket; like `shell.exec` it needs `ALLOW_SHELL=1`, because an agent with tools is at least as powerful as a shell)
+Condition ops: `eq ne contains not_contains matches gt gte lt lte in exists` + slow judges `script` (local command, exit 0 = pass) and `agent` (yes/no judged by the local model); for both, `field` may be `*` for the whole event
+Actions: `log`, `webhook.post`, `lark.webhook`, `shell.exec`, `agent.run` (hand the fired event to the local agent **with tools** and let it carry out a task — send an email, file a ticket)
 
 Adding an event = one line in `catalog.js` (fields + dedup key) + one branch in `sources.js`. The validator and the prompt follow automatically, because all three read the same catalog.
 
-`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output (`ALLOW_SHELL=1` gated), diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
+`observe.changed` is the open-world escape hatch for everything the predefined events can't express ("the competitor cut prices", "the API section of the docs changed"): it snapshots a URL (HTML stripped to text) or a local command's output, diffs against the previous snapshot stored in rule state, and hands `previous` + `content` to an `agent` condition that answers "did the thing the user described happen?". The snapshot digest is the dedup key, so an unchanged page costs zero model calls, and the model still only ever answers yes/no — fetching and actions stay whitelisted.
 
 The three open-world pieces compose. One sentence —
 
@@ -160,7 +160,7 @@ All optional (see `.env.example`):
 | `LT_SCHEDULER` | `on` | `off` = serve API/UI only, no polling |
 | `LT_TICK_MS` | `60000` | scheduler tick; cron granularity is 1 minute, so smaller buys nothing |
 | `LT_EVERY` | `*/10 * * * *` | default cadence when the sentence gives no rhythm |
-| `ALLOW_SHELL` | unset | enables the `shell.exec` action, `script` conditions and `observe` commands |
+| `ALLOW_SHELL` | `1` (on) | `0` disables everything shell-powered: `shell.exec`, `agent.run`, `script` conditions, `observe` commands |
 | `GITHUB_TOKEN` | unset | raises the GitHub API limit (60 req/h unauthenticated) |
 | `PI_BIN` | `pi` | binary used by the pi preset |
 | `PORT` / `HOST` | `8787` / `127.0.0.1` | server bind |
@@ -174,7 +174,7 @@ All optional (see `.env.example`):
 
 ## Security boundaries
 
-- Binds to `127.0.0.1` by default; `shell.exec` only runs when the server has `ALLOW_SHELL=1`, otherwise it is logged as `skipped`.
+- Binds to `127.0.0.1` by default. Shell-powered capabilities (`shell.exec`, `agent.run`, `script` conditions, `observe` commands) are **on by default**; set `ALLOW_SHELL=0` to disable them all (actions then log as `skipped`). Keep them off on any machine you do not fully trust the rules on.
 - There is **no** API authentication yet. Do not expose this to the public internet.
 - Unauthenticated GitHub API is limited to 60 req/h; set `GITHUB_TOKEN` for more.
 

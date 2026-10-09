@@ -6,7 +6,7 @@ export const SOURCES = {
   github: { required: ["repo"], optional: ["token_env"], note: "repo = owner/name" },
   http: { required: ["url"], optional: ["path", "headers"], note: "path = dot path into JSON body" },
   time: { required: [], optional: [], note: "pure schedule, no external fact" },
-  observe: { required: ["what"], optional: ["url", "command"], note: "open-world watch: url or command is required; what = what the user wants to detect, in their words. command needs ALLOW_SHELL=1" },
+  observe: { required: ["what"], optional: ["url", "command"], note: "open-world watch: url or command is required; what = what the user wants to detect, in their words" },
 };
 
 // event -> { source, summary, fields, key }
@@ -81,7 +81,7 @@ export const OPS = {
   in: { args: 1, note: "value is an array: field value is in the set" },
   exists: { args: 0, note: "field present and non-empty" },
   agent: { args: 1, note: "semantic judgement: value is one yes/no question, answered by the local model against the event at check time; field is an event field or * for the whole event. The only op that calls a model at runtime; runs only on fresh events that passed the deterministic conditions" },
-  script: { args: 1, note: "script judgement: value is a local command; the event JSON arrives on stdin (LT_EVENT/LT_FIELD env vars carry context), exit code 0 = pass. Needs ALLOW_SHELL=1; field is an event field or *; runs only on fresh events that passed the deterministic conditions" },
+  script: { args: 1, note: "script judgement: value is a local command; the event JSON arrives on stdin (LT_EVENT/LT_FIELD env vars carry context), exit code 0 = pass. field is an event field or *; runs only on fresh events that passed the deterministic conditions" },
 };
 
 export const ACTIONS = {
@@ -99,16 +99,20 @@ export const ACTIONS = {
   "shell.exec": {
     params: { command: "template" },
     required: ["command"],
-    note: "run a local command; enabled only when the server runs with ALLOW_SHELL=1",
+    note: "run a local command (on by default; disable with ALLOW_SHELL=0)",
     gated: "ALLOW_SHELL",
   },
   "agent.run": {
     params: { task: "template" },
     required: ["task"],
-    note: "hand the fired event to the local agent WITH TOOLS and let it carry out the task (send an email, file a ticket, ...). Use when no other action can do what the user asked. Needs ALLOW_SHELL=1",
+    note: "hand the fired event to the local agent WITH TOOLS and let it carry out the task (send an email, file a ticket, ...). Use when no other action can do what the user asked",
     gated: "ALLOW_SHELL",
   },
 };
+
+// Shell-powered capabilities (shell.exec, agent.run, script conditions, observe
+// commands) are ON by default; set ALLOW_SHELL=0 to disable them all.
+export const shellAllowed = () => process.env.ALLOW_SHELL !== "0";
 
 // {{field}} templates are rendered from the fact object.
 export function eventsForSource(source) {

@@ -1,11 +1,12 @@
 // Slow judges — the conditions the engine cannot evaluate as a pure expression.
 // Two kinds, both run only on fresh facts that already passed the deterministic ops:
-//   op "script": a local command; fact JSON on stdin, exit code 0 = pass. ALLOW_SHELL=1 gated.
+//   op "script": a local command; fact JSON on stdin, exit code 0 = pass. ALLOW_SHELL=0 disables.
 //   op "agent" : the local model answers yes/no questions about the fact.
 // Scripts run first (cheap, local) and short-circuit; the model is asked last.
 // Dedup guarantees at most one judgement per fact per rule.
 import { spawn } from "node:child_process";
 import { agentJson } from "./agent.js";
+import { shellAllowed } from "./catalog.js";
 
 const SYSTEM = `You are a strict yes/no judge inside a trigger system. You get one event (JSON) and numbered questions about it.
 Answer ONLY with {"answers":[{"n":1,"yes":true|false,"why":"<short reason, user's language>"}, ...]} — one entry per question, same order.
@@ -25,7 +26,7 @@ export async function judgeFact(conds, fact, { model } = {}) {
 
 /** Script judge: fact JSON on stdin, LT_EVENT/LT_FIELD in env, exit 0 = pass. */
 export function runScriptJudge(cond, fact, { event = "", timeoutMs = 30_000 } = {}) {
-  if (process.env.ALLOW_SHELL !== "1") throw new Error(`script condition needs ALLOW_SHELL=1 (command: ${cond.value})`);
+  if (!shellAllowed()) throw new Error(`script condition disabled by ALLOW_SHELL=0 (command: ${cond.value})`);
   return new Promise((resolve, reject) => {
     const child = spawn(cond.value, {
       shell: true,

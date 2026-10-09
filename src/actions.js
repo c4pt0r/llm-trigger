@@ -1,9 +1,10 @@
 // Action executors. log/webhook/shell are deterministic: they only render
 // {{field}} from the fact and call out. agent.run is the one exception — it
-// hands the event to the local agent WITH TOOLS; like shell.exec it is gated
-// by ALLOW_SHELL=1, because an agent with tools is at least as powerful as a shell.
+// hands the event to the local agent WITH TOOLS; like shell.exec it honours
+// ALLOW_SHELL=0 (an agent with tools is at least as powerful as a shell).
 import { spawnSync } from "node:child_process";
 import { renderTemplate } from "./schema.js";
+import { shellAllowed } from "./catalog.js";
 import { agentComplete } from "./agent.js";
 
 const EXEC_SYSTEM = `You are the executor of a trigger system. A rule just fired on an event; carry out the task below using the tools you have.
@@ -39,7 +40,7 @@ export async function runAction(rule, fact) {
     }
 
     case "shell.exec": {
-      if (process.env.ALLOW_SHELL !== "1") return { status: "skipped", detail: "shell.exec needs ALLOW_SHELL=1 on the server" };
+      if (!shellAllowed()) return { status: "skipped", detail: "shell.exec disabled by ALLOW_SHELL=0" };
       const cmd = r(params.command);
       const p = spawnSync("/bin/bash", ["-c", cmd], { encoding: "utf8", timeout: 60_000 });
       const out = (p.stdout || p.stderr || "").trim().slice(0, 500);
@@ -47,7 +48,7 @@ export async function runAction(rule, fact) {
     }
 
     case "agent.run": {
-      if (process.env.ALLOW_SHELL !== "1") return { status: "skipped", detail: "agent.run needs ALLOW_SHELL=1 on the server (an agent with tools can run commands)" };
+      if (!shellAllowed()) return { status: "skipped", detail: "agent.run disabled by ALLOW_SHELL=0 (an agent with tools can run commands)" };
       const task = r(params.task);
       try {
         const res = await agentComplete({ exec: true, system: EXEC_SYSTEM, user: `Task:\n${task}\n\nEvent:\n${JSON.stringify(fact)}` });

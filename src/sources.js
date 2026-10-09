@@ -1,6 +1,7 @@
 // Fact providers. Each returns an array of plain fact objects (newest first)
 // whose keys are exactly the fields declared in catalog.js for that event.
 import { createHash } from "node:crypto";
+import { shellAllowed } from "./catalog.js";
 import { spawn } from "node:child_process";
 
 const UA = "llm-trigger/0.1";
@@ -79,7 +80,7 @@ function stripHtml(s) {
 }
 
 function runCommand(command, timeoutMs = 30_000) {
-  if (process.env.ALLOW_SHELL !== "1") throw new Error(`observe command needs ALLOW_SHELL=1 (command: ${command})`);
+  if (!shellAllowed()) throw new Error(`observe command disabled by ALLOW_SHELL=0 (command: ${command})`);
   return new Promise((resolve, reject) => {
     const child = spawn(command, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "", settled = false;
